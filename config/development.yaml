@@ -1,0 +1,59 @@
+# config/development.yaml
+project:
+  name: "CTF AI Attack Simulation System"
+  version: "0.1.0"
+  description: "Intelligent attack simulation for CTF challenges"
+
+environment: development
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  debug: true
+  workers: 1
+
+database:
+  type: "sqlite"
+  path: "data/ctf_ai.db"
+  echo: true
+
+ai:
+  provider: "deepseek"  
+  model: "deepseek-chat"  
+  api_key: "sk-c6e58d88fdad4b899bd2365616529302"  
+  base_url: "https://api.deepseek.com"  
+  temperature: 0.7
+  max_tokens: 2000
+  timeout: 30  # API超时时间（秒）
+  
+  deepseek:
+    api_version: "v1"
+    stream: false  
+    max_retries: 3  
+
+mcp:
+  tools_dir: "src/mcp_server/tools"
+  timeout: 30
+  max_retries: 3
+
+tools:
+  sqlmap:
+    path: "/usr/bin/sqlmap"  # Kali路径
+    windows_path: "C:/Program Files/sqlmap/sqlmap.py"
+  nmap:
+    path: "/usr/bin/nmap"
+    windows_path: "C:/Program Files/Nmap/nmap.exe"
+  burpsuite:
+    path: "/usr/bin/burpsuite"
+
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/ctf_ai.log"
+  max_size: 10485760  # 10MB
+  backup_count: 5
+
+security:
+  secret_key: "${SECRET_KEY}"
+  allowed_hosts: ["127.0.0.1", "localhost"]
+  cors_origins: ["http://localhost:3000"]

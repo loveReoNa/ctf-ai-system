@@ -8,6 +8,7 @@ flask-cors>=4.0.0
 # AI/LLM
 openai>=1.0.0
 langchain>=0.0.300
+langchain-openai>=0.0.2
 mcp>=0.1.0
 
 # 网络请求
