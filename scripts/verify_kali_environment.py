@@ -62,7 +62,6 @@ def main():
         ("sqlmap", "sqlmap --version", "SQL注入工具"),
         ("nmap", "nmap --version", "端口扫描工具"),
         ("python3", "python3 --version", "Python 3"),
-        ("pip3", "pip3 --version", "Python包管理器"),
         ("git", "git --version", "版本控制"),
     ]
     
@@ -76,6 +75,36 @@ def main():
         else:
             print_check(f"{tool_name} ({description})", False, "未安装")
         checks_total += 1
+    
+    # 3.1 检查虚拟环境
+    print("\n3.1 Python虚拟环境检查")
+    venv_path = Path.cwd() / "venv"
+    venv_exists = venv_path.exists()
+    
+    if venv_exists:
+        python_path = venv_path / "bin" / "python"
+        if python_path.exists():
+            success, version_out, _ = run_command(f"{python_path} --version", check=False)
+            version = version_out if version_out else "虚拟环境Python"
+            if print_check("Python虚拟环境", True, f"已创建 ({version})"):
+                checks_passed += 1
+        else:
+            print_check("Python虚拟环境", False, "存在但Python不可用")
+    else:
+        print_check("Python虚拟环境", False, "未创建 (Kali需要虚拟环境)")
+    checks_total += 1
+    
+    # 3.2 检查pip在虚拟环境中
+    if venv_exists:
+        pip_path = venv_path / "bin" / "pip"
+        if pip_path.exists():
+            print_check("虚拟环境pip", True, "可用")
+            checks_passed += 1
+        else:
+            print_check("虚拟环境pip", False, "不可用")
+    else:
+        print_check("虚拟环境pip", False, "虚拟环境不存在")
+    checks_total += 1
     
     # 4. 检查项目结构
     print("\n4. 项目结构检查")
@@ -117,10 +146,24 @@ def main():
     if percentage >= 80:
         print("\n🎉 环境验证通过！可以开始项目部署。")
         print("\n下一步建议:")
-        print("1. 安装Python依赖: pip3 install -r requirements.txt")
-        print("2. 配置环境变量: cp .env.example .env")
-        print("3. 运行配置验证: python scripts/validate_config.py")
-        print("4. 测试MCP服务器: python scripts/test_mcp_server.py")
+        
+        if venv_exists:
+            print("1. 激活虚拟环境: source venv/bin/activate")
+            print("2. 安装Python依赖: pip install -r requirements.txt")
+        else:
+            print("1. 创建虚拟环境: python3 -m venv venv")
+            print("2. 激活虚拟环境: source venv/bin/activate")
+            print("3. 安装Python依赖: pip install -r requirements.txt")
+        
+        print("4. 配置环境变量: cp .env.example .env")
+        print("5. 运行配置验证: python scripts/validate_config.py")
+        print("6. 测试MCP服务器: python scripts/test_mcp_server.py")
+        
+        # 提供快速设置脚本建议
+        setup_script = Path.cwd() / "scripts" / "setup_kali_venv.sh"
+        if setup_script.exists():
+            print(f"\n💡 快速设置: chmod +x scripts/setup_kali_venv.sh && ./scripts/setup_kali_venv.sh")
+            
     elif percentage >= 50:
         print("\n⚠️ 环境基本就绪，但需要安装一些工具。")
         print("\n需要安装的工具:")
@@ -128,8 +171,16 @@ def main():
             success, _, _ = run_command(f"which {tool_name}", check=False)
             if not success:
                 print(f"  - {tool_name}: {description}")
+        
+        # 虚拟环境建议
+        if not venv_exists:
+            print(f"  - python3-venv: 虚拟环境支持 (sudo apt install python3-venv)")
+            
     else:
         print("\n❌ 环境不满足要求，请先安装必要工具。")
+        print("\n建议运行设置脚本:")
+        print("  chmod +x scripts/setup_kali_venv.sh")
+        print("  ./scripts/setup_kali_venv.sh")
     
     print("\n" + "=" * 60)
     
