@@ -76,6 +76,12 @@
    - SQLMap和Nmap工具包装器
    - 工具调用接口
 
+6. **Kali Linux部署准备**
+   - Kali环境验证脚本 (`scripts/verify_kali_environment.py`)
+   - 详细部署指南 (`docs/kali_deployment.md`)
+   - 项目传输脚本 (Windows → Kali)
+   - 自动化配置脚本
+
 ### ⚠️ 进行中
 1. **AI代理框架** (ReAct架构)
 2. **Web可视化界面**
@@ -86,10 +92,13 @@
 2. 实时监控仪表板
 3. 完整测试套件
 4. Docker容器化
+5. Kali环境完整测试
 
 ## 快速开始
 
-### 1. 环境准备
+### Windows 环境
+
+#### 1. 环境准备
 ```bash
 # 克隆仓库
 git clone <repository-url>
@@ -103,13 +112,13 @@ cp .env.example .env
 # 编辑.env文件，添加DeepSeek API密钥
 ```
 
-### 2. 配置验证
+#### 2. 配置验证
 ```bash
 # 验证配置
 python scripts/validate_config.py
 ```
 
-### 3. 启动MCP服务器
+#### 3. 启动MCP服务器
 ```bash
 # 方式一：使用启动脚本
 python scripts/start_mcp_server.py
@@ -121,7 +130,7 @@ python src/mcp_server/server.py --server
 python scripts/test_mcp_server.py
 ```
 
-### 4. 测试工具集成
+#### 4. 测试工具集成
 ```bash
 # 测试SQLMap包装器
 python -c "
@@ -136,6 +145,71 @@ async def test():
 asyncio.run(test())
 "
 ```
+
+### Kali Linux 环境
+
+Kali Linux已预装所有安全工具，部署更简单：
+
+#### 1. 传输项目到Kali
+```bash
+# 方法一：使用传输脚本（在Windows中运行）
+# 编辑 scripts/transfer_to_kali.bat 中的Kali IP地址
+scripts/transfer_to_kali.bat
+
+# 方法二：手动传输
+scp -r .ctfagent kali@<kali-ip>:/home/kali/
+```
+
+#### 2. Kali环境验证
+```bash
+# 在Kali中运行
+cd .ctfagent
+python3 scripts/verify_kali_environment.py
+```
+
+#### 3. 安装依赖和配置
+```bash
+# 安装Python依赖
+pip3 install -r requirements.txt
+
+# 配置环境变量
+cp .env.example .env
+nano .env  # 添加DeepSeek API密钥
+```
+
+#### 4. 运行测试
+```bash
+# 验证配置
+python3 scripts/validate_config.py
+
+# 测试MCP服务器
+python3 scripts/test_mcp_server.py
+
+# 启动服务器
+python3 scripts/start_mcp_server.py
+```
+
+#### 5. 验证工具可用性
+```bash
+# 在Kali中，安全工具应该已安装
+which sqlmap  # 应该显示 /usr/bin/sqlmap
+which nmap    # 应该显示 /usr/bin/nmap
+
+# 测试工具连接
+python3 -c "
+import asyncio
+from src.mcp_server.tools.sqlmap_wrapper import SQLMapWrapper
+
+async def test():
+    wrapper = SQLMapWrapper()
+    connected = await wrapper.test_connection()
+    print(f'SQLMap连接测试: {\"✅ 成功\" if connected else \"❌ 失败\"}')
+
+asyncio.run(test())
+"
+```
+
+详细Kali部署指南请参考 [docs/kali_deployment.md](docs/kali_deployment.md)
 
 ## MCP服务器使用
 
