@@ -1,5 +1,5 @@
 # 核心依赖
-python>=3.8
+# Python版本要求: >=3.8 (在pyproject.toml或setup.py中指定)
 
 # Web框架
 flask>=2.3.0

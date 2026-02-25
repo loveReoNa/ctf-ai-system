@@ -115,16 +115,22 @@ verify_installation() {
     
     # 检查Python包
     echo "已安装包:"
-    pip list | grep -E "(fastapi|langchain|mcp|deepseek)" || true
+    pip list | grep -E "(flask|langchain|mcp|openai)" || true
     
     # 测试导入
     echo -e "\n测试导入..."
     python3 -c "
 try:
-    import fastapi
-    print('✅ fastapi 导入成功')
+    import flask
+    print('✅ flask 导入成功')
 except ImportError as e:
-    print(f'❌ fastapi 导入失败: {e}')
+    print(f'❌ flask 导入失败: {e}')
+
+try:
+    import openai
+    print('✅ openai 导入成功')
+except ImportError as e:
+    print(f'❌ openai 导入失败: {e}')
     
 try:
     from src.utils.logger import logger
