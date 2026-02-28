@@ -86,8 +86,8 @@ class ReActAgent:
         self.state = AgentState.IDLE
         self.logger = logger.getChild("react_agent")
         
-        # 初始化AI客户端
-        self.ai_client = DeepSeekClient(config.get("ai", {}))
+        # 初始化AI客户端（DeepSeekClient从配置管理器读取配置）
+        self.ai_client = DeepSeekClient()
         
         # 初始化MCP服务器
         self.mcp_server = CTFMCPServer()
@@ -191,24 +191,41 @@ class ReActAgent:
             self.state = AgentState.FAILED
             return {"error": str(e)}
     
-    def _parse_analysis_response(self, response: str) -> Dict[str, Any]:
+    def _parse_analysis_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """解析AI分析响应"""
         try:
+            # 检查响应是否成功
+            if not response.get("success", False):
+                return {
+                    "raw_response": response.get("error", "API调用失败"),
+                    "vulnerabilities": ["API错误"],
+                    "confidence": 0.1
+                }
+            
+            # 获取响应内容
+            content = response.get("content", "")
+            if not content:
+                return {
+                    "raw_response": "空响应",
+                    "vulnerabilities": ["未知"],
+                    "confidence": 0.3
+                }
+            
             # 尝试从响应中提取JSON
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
                 return json.loads(json_match.group())
             
             # 如果找不到JSON，返回原始响应
             return {
-                "raw_response": response,
+                "raw_response": content,
                 "vulnerabilities": ["未知"],
                 "confidence": 0.5
             }
         except json.JSONDecodeError as e:
             self.logger.warning(f"JSON解析失败: {e}")
             return {
-                "raw_response": response,
+                "raw_response": response.get("content", str(response)),
                 "vulnerabilities": ["解析失败"],
                 "confidence": 0.3
             }
@@ -293,36 +310,56 @@ class ReActAgent:
             self.state = AgentState.FAILED
             raise
     
-    def _parse_attack_steps(self, response: str) -> List[Dict[str, Any]]:
+    def _parse_attack_steps(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
         """解析攻击步骤"""
         try:
+            # 检查响应是否成功
+            if not response.get("success", False):
+                self.logger.warning(f"API调用失败: {response.get('error', '未知错误')}")
+                return self._get_default_steps()
+            
+            # 获取响应内容
+            content = response.get("content", "")
+            if not content:
+                self.logger.warning("API返回空内容")
+                return self._get_default_steps()
+            
             # 尝试从响应中提取JSON数组
-            array_match = re.search(r'\[.*\]', response, re.DOTALL)
+            array_match = re.search(r'\[.*\]', content, re.DOTALL)
             if array_match:
                 return json.loads(array_match.group())
             
-            # 如果找不到JSON数组，创建简单步骤
-            return [
-                {
-                    "step_id": 1,
-                    "action": "信息收集",
-                    "tool": "nmap_scan",
-                    "parameters": {"target": self.current_plan.challenge.target_url},
-                    "reasoning": "首先收集目标信息",
-                    "expected_result": "获取开放端口和服务信息"
-                },
-                {
-                    "step_id": 2,
-                    "action": "漏洞扫描",
-                    "tool": "sqlmap_scan",
-                    "parameters": {"url": self.current_plan.challenge.target_url},
-                    "reasoning": "扫描SQL注入漏洞",
-                    "expected_result": "识别SQL注入点"
-                }
-            ]
+            # 如果找不到JSON数组，创建默认步骤
+            self.logger.warning("未找到JSON数组，使用默认步骤")
+            return self._get_default_steps()
+            
         except json.JSONDecodeError as e:
             self.logger.warning(f"攻击步骤JSON解析失败: {e}")
+            return self._get_default_steps()
+    
+    def _get_default_steps(self) -> List[Dict[str, Any]]:
+        """获取默认攻击步骤"""
+        if not self.current_plan:
             return []
+        
+        return [
+            {
+                "step_id": 1,
+                "action": "信息收集",
+                "tool": "nmap_scan",
+                "parameters": {"target": self.current_plan.challenge.target_url},
+                "reasoning": "首先收集目标信息",
+                "expected_result": "获取开放端口和服务信息"
+            },
+            {
+                "step_id": 2,
+                "action": "漏洞扫描",
+                "tool": "sqlmap_scan",
+                "parameters": {"url": self.current_plan.challenge.target_url},
+                "reasoning": "扫描SQL注入漏洞",
+                "expected_result": "识别SQL注入点"
+            }
+        ]
     
     async def execute_plan(self) -> Dict[str, Any]:
         """

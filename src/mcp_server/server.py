@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import sys
+import platform
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 
@@ -15,6 +16,33 @@ from mcp.client.stdio import stdio_client
 
 from src.utils.logger import logger, LoggerMixin
 from src.utils.config_manager import config
+
+
+def get_tool_path(tool_name: str) -> str:
+    """
+    根据操作系统获取工具路径
+    
+    Args:
+        tool_name: 工具名称 (sqlmap, nmap, burpsuite)
+        
+    Returns:
+        工具路径字符串
+    """
+    # 检测操作系统
+    system = platform.system().lower()
+    
+    # 构建配置键
+    if system == "windows":
+        config_key = f"tools.{tool_name}.windows_path"
+    else:
+        # Linux/macOS使用通用路径
+        config_key = f"tools.{tool_name}.path"
+    
+    # 从配置获取路径
+    path = config.get(config_key, tool_name)
+    
+    # 如果配置中没有，使用工具名称（假设在PATH中）
+    return path
 
 
 class CTFMCPTool:
@@ -46,7 +74,7 @@ class SQLMapTool(CTFMCPTool):
             name="sqlmap_scan",
             description="使用sqlmap进行SQL注入扫描"
         )
-        self.sqlmap_path = config.get("tools.sqlmap.windows_path", "sqlmap")
+        self.sqlmap_path = get_tool_path("sqlmap")
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -140,7 +168,7 @@ class NmapTool(CTFMCPTool):
             name="nmap_scan",
             description="使用nmap进行端口扫描"
         )
-        self.nmap_path = config.get("tools.nmap.windows_path", "nmap")
+        self.nmap_path = get_tool_path("nmap")
     
     def get_schema(self) -> Dict[str, Any]:
         return {
@@ -297,14 +325,25 @@ class CTFMCPServer:
     
     def _check_tool_configurations(self):
         """检查工具配置"""
-        sqlmap_path = config.get("tools.sqlmap.windows_path")
-        nmap_path = config.get("tools.nmap.windows_path")
+        sqlmap_path = get_tool_path("sqlmap")
+        nmap_path = get_tool_path("nmap")
         
-        if not sqlmap_path or not Path(sqlmap_path).exists():
-            self.logger.warning(f"SQLMap路径可能无效: {sqlmap_path}")
+        # 检查路径是否存在
+        if sqlmap_path and sqlmap_path != "sqlmap":
+            if not Path(sqlmap_path).exists():
+                self.logger.warning(f"SQLMap路径可能无效: {sqlmap_path}")
+            else:
+                self.logger.info(f"SQLMap路径有效: {sqlmap_path}")
+        else:
+            self.logger.info("使用默认SQLMap路径（假设在PATH中）")
         
-        if not nmap_path or not Path(nmap_path).exists():
-            self.logger.warning(f"Nmap路径可能无效: {nmap_path}")
+        if nmap_path and nmap_path != "nmap":
+            if not Path(nmap_path).exists():
+                self.logger.warning(f"Nmap路径可能无效: {nmap_path}")
+            else:
+                self.logger.info(f"Nmap路径有效: {nmap_path}")
+        else:
+            self.logger.info("使用默认Nmap路径（假设在PATH中）")
     
     async def handle_list_tools(self) -> List[Dict[str, Any]]:
         """处理列出工具请求"""
