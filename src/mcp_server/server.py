@@ -16,6 +16,7 @@ from mcp.client.stdio import stdio_client
 
 from src.utils.logger import logger, LoggerMixin
 from src.utils.config_manager import config
+from src.utils.tool_parser import tool_parser_factory
 
 
 def get_tool_path(tool_name: str) -> str:
@@ -296,13 +297,75 @@ class CTFMCPToolManager(LoggerMixin):
         
         try:
             self.log_info(f"执行工具: {name}, 参数: {arguments}")
-            result = await tool.execute(**arguments)
+            # 执行工具
+            raw_result = await tool.execute(**arguments)
+            
+            # 解析工具输出
+            parsed_result = self._parse_tool_output(name, raw_result)
+            
+            # 合并结果
+            result = {
+                **raw_result,
+                "parsed": parsed_result
+            }
+            
+            self.log_info(f"工具执行完成: {name}, 解析结果: {parsed_result.get('success', False)}")
             return result
+            
         except Exception as e:
             self.log_error(f"工具执行失败: {name}, 错误: {e}")
             return {
                 "success": False,
                 "error": str(e)
+            }
+    
+    def _parse_tool_output(self, tool_name: str, raw_result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        解析工具输出
+        
+        Args:
+            tool_name: 工具名称
+            raw_result: 原始工具执行结果
+            
+        Returns:
+            解析后的结果
+        """
+        try:
+            # 检查工具是否执行成功
+            if not raw_result.get("success", False):
+                return {
+                    "success": False,
+                    "error": raw_result.get("error", "工具执行失败"),
+                    "message": "工具执行失败，无法解析输出"
+                }
+            
+            # 获取工具输出
+            stdout = raw_result.get("stdout", "")
+            stderr = raw_result.get("stderr", "")
+            
+            # 使用工具解析器工厂解析输出
+            parsed_result = tool_parser_factory.parse_tool_output(tool_name, stdout)
+            
+            # 如果解析失败，尝试使用stderr
+            if not parsed_result.get("success", False) and stderr:
+                parsed_result = tool_parser_factory.parse_tool_output(tool_name, stderr)
+            
+            # 添加原始输出摘要
+            parsed_result["raw_output_summary"] = {
+                "stdout_length": len(stdout),
+                "stderr_length": len(stderr),
+                "has_stdout": bool(stdout),
+                "has_stderr": bool(stderr)
+            }
+            
+            return parsed_result
+            
+        except Exception as e:
+            self.log_error(f"工具输出解析失败: {tool_name}, 错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "工具输出解析失败"
             }
 
 

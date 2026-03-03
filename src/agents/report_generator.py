@@ -54,7 +54,8 @@ class ReportGenerator:
             "html": self._generate_html_report,
             "markdown": self._generate_markdown_report,
             "json": self._generate_json_report,
-            "text": self._generate_text_report
+            "text": self._generate_text_report,
+            "pdf": self._generate_pdf_report
         }
         
         self.logger.info(f"报告生成器初始化完成，输出目录: {self.output_dir}")
@@ -206,9 +207,8 @@ class ReportGenerator:
             recommendations.append("  - 实施安全监控和告警")
         
         return recommendations
-    
-    def generate_report(self, 
-                       execution_report: Dict[str, Any], 
+    def generate_report(self,
+                       execution_report: Dict[str, Any],
                        analysis_result: AnalysisResult,
                        format: str = "html") -> Dict[str, Any]:
         """
@@ -217,7 +217,7 @@ class ReportGenerator:
         Args:
             execution_report: 执行报告
             analysis_result: 分析结果
-            format: 报告格式 (html, markdown, json, text)
+            format: 报告格式 (html, markdown, json, text, pdf)
             
         Returns:
             报告内容和文件路径
@@ -239,8 +239,33 @@ class ReportGenerator:
         filename = f"attack_report_{challenge_title}_{timestamp}.{format}"
         filepath = self.output_dir / filename
         
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
+        if format == "pdf":
+            # PDF内容以base64编码返回，需要解码保存为二进制文件
+            try:
+                import base64
+                # 检查内容是否是有效的base64编码的PDF
+                if content.startswith("PDF生成功能需要reportlab库") or content.startswith("PDF报告生成失败"):
+                    # 这是错误消息，不是base64编码的PDF
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    content_preview = content
+                else:
+                    # 尝试解码为base64
+                    pdf_content = base64.b64decode(content)
+                    with open(filepath, "wb") as f:
+                        f.write(pdf_content)
+                    content_preview = "[PDF二进制内容，大小: {}字节]".format(len(pdf_content))
+            except Exception as e:
+                self.logger.error(f"PDF保存失败: {e}")
+                # 将错误消息保存为文本文件
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(f"PDF生成失败: {str(e)}\n\n原始内容: {content}")
+                content_preview = f"PDF保存失败: {str(e)}"
+        else:
+            # 文本格式文件
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(content)
+            content_preview = content[:1000] + "..." if len(content) > 1000 else content
         
         self.logger.info(f"报告已保存: {filepath}")
         
@@ -248,7 +273,7 @@ class ReportGenerator:
             "format": format,
             "filename": filename,
             "filepath": str(filepath),
-            "content": content[:1000] + "..." if len(content) > 1000 else content
+            "content": content_preview
         }
     
     def _generate_html_report(self, 
@@ -753,7 +778,6 @@ CTF攻击模拟分析报告
             text += f"     工具: {step.get('tool', '手动')}, 状态: {status}, 时间: {step.get('execution_time', 0):.2f}s{flag}\n"
         
         return text
-    
     def _generate_recommendations_text(self, recommendations: List[str]) -> str:
         """生成建议文本"""
         if not recommendations:
@@ -764,6 +788,215 @@ CTF攻击模拟分析报告
             text += f"  - {rec}\n"
         
         return text
+    
+    def _generate_pdf_report(self,
+                           execution_report: Dict[str, Any],
+                           analysis_result: AnalysisResult) -> str:
+        """生成PDF报告"""
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from reportlab.lib import colors
+            from reportlab.pdfgen import canvas
+            from io import BytesIO
+            
+            # 创建PDF文档
+            buffer = BytesIO()
+            doc = SimpleDocTemplate(buffer, pagesize=letter)
+            
+            # 获取样式
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=16,
+                spaceAfter=12,
+                textColor=colors.darkblue
+            )
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontSize=14,
+                spaceAfter=8,
+                textColor=colors.darkgreen
+            )
+            normal_style = styles['Normal']
+            
+            # 构建内容
+            story = []
+            
+            # 标题
+            story.append(Paragraph("CTF攻击模拟分析报告", title_style))
+            story.append(Paragraph(f"生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}", normal_style))
+            story.append(Spacer(1, 20))
+            
+            # 挑战概览
+            challenge = execution_report.get("challenge", {})
+            story.append(Paragraph("挑战概览", heading_style))
+            story.append(Paragraph(f"标题: {challenge.get('title', 'N/A')}", normal_style))
+            story.append(Paragraph(f"类别: {challenge.get('category', 'N/A')}", normal_style))
+            story.append(Paragraph(f"难度: {challenge.get('difficulty', 'N/A')}", normal_style))
+            story.append(Paragraph(f"目标URL: {challenge.get('target_url', 'N/A')}", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 执行摘要
+            execution_summary = execution_report.get("execution_summary", {})
+            stats = execution_summary.get("statistics", {})
+            story.append(Paragraph("执行摘要", heading_style))
+            
+            # 创建摘要表格
+            summary_data = [
+                ["指标", "值", "状态"],
+                ["总步骤数", str(stats.get('total_steps', 0)), "-"],
+                ["成功步骤", str(stats.get('successful_steps', 0)), "✓"],
+                ["失败步骤", str(stats.get('failed_steps', 0)), "✗"],
+                ["超时步骤", str(stats.get('timeout_steps', 0)), "⚠"],
+                ["攻击成功率", f"{analysis_result.success_rate:.1%}", "-"],
+                ["执行时间", f"{analysis_result.execution_time:.2f}秒", "-"],
+                ["总体状态", execution_summary.get('status', 'unknown'),
+                 "✓ 成功" if execution_report.get('success') else "✗ 失败"]
+            ]
+            
+            summary_table = Table(summary_data, colWidths=[2*inch, 1.5*inch, 1*inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(summary_table)
+            story.append(Spacer(1, 12))
+            
+            # 发现的Flag
+            story.append(Paragraph("发现的Flag", heading_style))
+            if analysis_result.flags_found:
+                for flag in analysis_result.flags_found:
+                    story.append(Paragraph(f"• {flag}", normal_style))
+            else:
+                story.append(Paragraph("未找到Flag", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 安全漏洞分析
+            story.append(Paragraph("安全漏洞分析", heading_style))
+            if analysis_result.vulnerabilities:
+                vuln_data = [["类型", "严重性", "步骤", "描述"]]
+                for vuln in analysis_result.vulnerabilities:
+                    severity = vuln.get("severity", "unknown")
+                    vuln_data.append([
+                        vuln.get("type", "未知"),
+                        severity,
+                        str(vuln.get("step", "N/A")),
+                        vuln.get("description", "无描述")[:50] + "..." if len(vuln.get("description", "")) > 50 else vuln.get("description", "无描述")
+                    ])
+                
+                vuln_table = Table(vuln_data, colWidths=[1.2*inch, 0.8*inch, 0.6*inch, 3.4*inch])
+                vuln_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.whitesmoke])
+                ]))
+                story.append(vuln_table)
+            else:
+                story.append(Paragraph("未发现安全漏洞", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 安全风险评估
+            story.append(Paragraph("安全风险评估", heading_style))
+            if analysis_result.security_risks:
+                risk_data = [["类型", "严重性", "步骤", "描述"]]
+                for risk in analysis_result.security_risks:
+                    severity = risk.get("severity", "unknown")
+                    risk_data.append([
+                        risk.get("type", "未知"),
+                        severity,
+                        str(risk.get("step", "N/A")),
+                        risk.get("description", "无描述")[:50] + "..." if len(risk.get("description", "")) > 50 else risk.get("description", "无描述")
+                    ])
+                
+                risk_table = Table(risk_data, colWidths=[1.2*inch, 0.8*inch, 0.6*inch, 3.4*inch])
+                risk_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.whitesmoke])
+                ]))
+                story.append(risk_table)
+            else:
+                story.append(Paragraph("未发现安全风险", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 详细步骤执行
+            story.append(Paragraph("详细步骤执行", heading_style))
+            step_details = execution_report.get("step_details", [])
+            if step_details:
+                step_data = [["步骤ID", "操作", "工具", "状态", "执行时间", "Flag"]]
+                for step in step_details:
+                    status = step.get("status", "unknown")
+                    flag = step.get("flag") if step.get("flag_detected") else "-"
+                    step_data.append([
+                        str(step.get("step_id", "N/A")),
+                        step.get("action", "N/A")[:20],
+                        step.get("tool", "手动")[:10],
+                        status,
+                        f"{step.get('execution_time', 0):.1f}s",
+                        flag[:15] if flag != "-" else "-"
+                    ])
+                
+                step_table = Table(step_data, colWidths=[0.6*inch, 1.5*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.5*inch])
+                step_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.whitesmoke])
+                ]))
+                story.append(step_table)
+            else:
+                story.append(Paragraph("无步骤执行记录", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 安全建议
+            story.append(Paragraph("安全建议", heading_style))
+            if analysis_result.recommendations:
+                for rec in analysis_result.recommendations:
+                    story.append(Paragraph(f"• {rec}", normal_style))
+            else:
+                story.append(Paragraph("无建议", normal_style))
+            story.append(Spacer(1, 12))
+            
+            # 页脚
+            story.append(Paragraph("=" * 60, normal_style))
+            story.append(Paragraph("报告由 CTF AI攻击模拟系统生成", normal_style))
+            story.append(Paragraph("仅供教育和安全测试目的使用", normal_style))
+            
+            # 构建PDF
+            doc.build(story)
+            
+            # 获取PDF内容
+            pdf_content = buffer.getvalue()
+            buffer.close()
+            
+            # 将PDF内容编码为base64字符串以便存储
+            import base64
+            return base64.b64encode(pdf_content).decode('utf-8')
+            
+        except ImportError:
+            self.logger.warning("reportlab库未安装，无法生成PDF报告")
+            return "PDF生成功能需要reportlab库，请安装: pip install reportlab"
+        except Exception as e:
+            self.logger.error(f"PDF报告生成失败: {e}")
+            return f"PDF报告生成失败: {str(e)}"
 
 
 # 示例使用

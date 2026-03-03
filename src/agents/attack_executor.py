@@ -73,6 +73,7 @@ class AttackExecutor:
             "step_timeout": 300,  # 单步超时时间（秒）
             "max_retries": 3,     # 最大重试次数
             "parallel_execution": False,  # 是否并行执行
+            "continue_on_failure": False,  # 失败时是否继续
             "flag_patterns": [    # flag匹配模式
                 r'flag\{[^}]+\}',
                 r'FLAG\{[^}]+\}',
@@ -80,7 +81,10 @@ class AttackExecutor:
                 r'CTF\{[^}]+\}',
                 r'[A-Za-z0-9]{32}',
                 r'[A-Za-z0-9]{64}',
-            ]
+            ],
+            "kali_optimizations": True,  # Kali环境优化
+            "step_dependencies": True,   # 步骤依赖关系
+            "monitoring_interval": 5,    # 监控间隔（秒）
         }
         
         # 工具映射
@@ -88,6 +92,12 @@ class AttackExecutor:
             "sqlmap_scan": self._execute_sqlmap,
             "nmap_scan": self._execute_nmap,
         }
+        
+        # 步骤依赖关系
+        self.step_dependencies = {}
+        
+        # 执行监控
+        self.monitoring_tasks = []
         
         self.logger.info("攻击执行引擎初始化完成")
     
@@ -117,6 +127,9 @@ class AttackExecutor:
         self.context = ExecutionContext(plan=plan, status=ExecutionStatus.RUNNING)
         
         try:
+            # 启动执行监控
+            await self._start_monitoring()
+            
             # 按顺序执行每个步骤
             for step in plan.steps:
                 if self.context.status == ExecutionStatus.FAILED:
@@ -153,6 +166,9 @@ class AttackExecutor:
             
             self.context.end_time = time.time()
             
+            # 停止监控
+            await self._stop_monitoring()
+            
             execution_time = self.context.end_time - self.context.start_time
             self.logger.info(f"攻击计划执行完成，状态: {self.context.status.value}, "
                            f"耗时: {execution_time:.2f}秒, "
@@ -164,6 +180,10 @@ class AttackExecutor:
             self.logger.error(f"攻击计划执行异常: {e}")
             self.context.status = ExecutionStatus.FAILED
             self.context.end_time = time.time()
+            
+            # 确保监控停止
+            await self._stop_monitoring()
+            
             raise
     
     async def _execute_step(self, step: AttackStep) -> ExecutionResult:
@@ -187,48 +207,102 @@ class AttackExecutor:
         
         start_time = time.time()
         
-        try:
-            # 检查是否有工具需要执行
-            if step.tool:
-                # 查找对应的工具执行函数
-                if step.tool in self.tool_mapping:
-                    tool_func = self.tool_mapping[step.tool]
-                    output = await tool_func(step.parameters)
+        # 检查步骤依赖关系
+        if self.config["step_dependencies"]:
+            dependencies_met = await self._check_step_dependencies(step)
+            if not dependencies_met:
+                result.status = ExecutionStatus.SKIPPED
+                result.error = "依赖步骤未完成"
+                result.execution_time = time.time() - start_time
+                self.logger.warning(f"步骤 {step.step_id} 跳过，依赖未满足")
+                return result
+        
+        # 重试机制
+        max_retries = self.config["max_retries"]
+        retry_count = 0
+        
+        while retry_count <= max_retries:
+            try:
+                # 检查是否有工具需要执行
+                if step.tool:
+                    # 查找对应的工具执行函数
+                    if step.tool in self.tool_mapping:
+                        tool_func = self.tool_mapping[step.tool]
+                        output = await self._execute_with_timeout(tool_func, step.parameters)
+                    else:
+                        # 使用MCP服务器执行工具
+                        output = await self._execute_with_timeout(
+                            self.mcp_server.handle_call_tool,
+                            step.tool,
+                            step.parameters
+                        )
+                    
+                    result.output = output
+                    
+                    # 检查工具执行是否成功
+                    if output.get("success", False):
+                        result.status = ExecutionStatus.SUCCESS
+                        
+                        # 从输出中提取flag
+                        flag = self._extract_flag_from_output(output)
+                        if flag:
+                            result.flag_detected = True
+                            result.flag = flag
+                            self.logger.info(f"步骤 {step.step_id} 找到flag: {flag}")
+                        
+                        # 成功，跳出重试循环
+                        break
+                    else:
+                        result.status = ExecutionStatus.FAILED
+                        result.error = output.get("error", "工具执行失败")
+                        
+                        # 如果还有重试机会，继续重试
+                        if retry_count < max_retries:
+                            retry_count += 1
+                            wait_time = 2 ** retry_count  # 指数退避
+                            self.logger.info(f"步骤 {step.step_id} 失败，{wait_time}秒后重试 (第{retry_count}次)")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            # 重试次数用完
+                            break
+                    
                 else:
-                    # 使用MCP服务器执行工具
-                    output = await self.mcp_server.handle_call_tool(step.tool, step.parameters)
-                
-                result.output = output
-                
-                # 检查工具执行是否成功
-                if output.get("success", False):
+                    # 无工具步骤（如信息分析、手动操作）
                     result.status = ExecutionStatus.SUCCESS
-                    
-                    # 从输出中提取flag
-                    flag = self._extract_flag_from_output(output)
-                    if flag:
-                        result.flag_detected = True
-                        result.flag = flag
-                        self.logger.info(f"步骤 {step.step_id} 找到flag: {flag}")
+                    result.output = {"message": "无工具步骤执行完成"}
+                    self.logger.info(f"步骤 {step.step_id} 完成（无工具）")
+                    break
+                
+            except asyncio.TimeoutError:
+                result.status = ExecutionStatus.TIMEOUT
+                result.error = f"步骤执行超时（{self.config['step_timeout']}秒）"
+                self.logger.warning(f"步骤 {step.step_id} 执行超时")
+                
+                # 如果还有重试机会，继续重试
+                if retry_count < max_retries:
+                    retry_count += 1
+                    wait_time = 2 ** retry_count
+                    self.logger.info(f"步骤 {step.step_id} 超时，{wait_time}秒后重试 (第{retry_count}次)")
+                    await asyncio.sleep(wait_time)
+                    continue
                 else:
-                    result.status = ExecutionStatus.FAILED
-                    result.error = output.get("error", "工具执行失败")
-                    
-            else:
-                # 无工具步骤（如信息分析、手动操作）
-                result.status = ExecutionStatus.SUCCESS
-                result.output = {"message": "无工具步骤执行完成"}
-                self.logger.info(f"步骤 {step.step_id} 完成（无工具）")
-            
-        except asyncio.TimeoutError:
-            result.status = ExecutionStatus.TIMEOUT
-            result.error = f"步骤执行超时（{self.config['step_timeout']}秒）"
-            self.logger.warning(f"步骤 {step.step_id} 执行超时")
-            
-        except Exception as e:
-            result.status = ExecutionStatus.FAILED
-            result.error = str(e)
-            self.logger.error(f"步骤 {step.step_id} 执行失败: {e}")
+                    break
+                
+            except Exception as e:
+                result.status = ExecutionStatus.FAILED
+                result.error = str(e)
+                self.logger.error(f"步骤 {step.step_id} 执行失败: {e}")
+                
+                # 如果还有重试机会，继续重试
+                if retry_count < max_retries:
+                    retry_count += 1
+                    wait_time = 2 ** retry_count
+                    self.logger.info(f"步骤 {step.step_id} 异常，{wait_time}秒后重试 (第{retry_count}次)")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    break
         
         # 计算执行时间
         result.execution_time = time.time() - start_time
@@ -236,12 +310,13 @@ class AttackExecutor:
         # 添加元数据
         result.metadata = {
             "timestamp": time.time(),
-            "retry_count": 0,  # 可以扩展重试逻辑
-            "step_type": "tool" if step.tool else "manual"
+            "retry_count": retry_count,
+            "step_type": "tool" if step.tool else "manual",
+            "dependencies_checked": self.config["step_dependencies"]
         }
         
         self.logger.info(f"步骤 {step.step_id} 执行完成，状态: {result.status.value}, "
-                       f"耗时: {result.execution_time:.2f}秒")
+                       f"耗时: {result.execution_time:.2f}秒, 重试次数: {retry_count}")
         
         return result
     
@@ -565,6 +640,99 @@ class AttackExecutor:
             recommendations.append("  - 实施安全监控和日志审计")
         
         return recommendations
+    
+    async def _check_step_dependencies(self, step: AttackStep) -> bool:
+        """
+        检查步骤依赖关系
+        
+        Args:
+            step: 当前步骤
+            
+        Returns:
+            依赖是否满足
+        """
+        if not self.context:
+            return True
+        
+        # 简单依赖检查：确保前序步骤成功
+        for prev_step in self.context.plan.steps:
+            if prev_step.step_id >= step.step_id:
+                continue
+            
+            # 查找前序步骤的执行结果
+            prev_result = next(
+                (r for r in self.context.results if r.step_id == prev_step.step_id),
+                None
+            )
+            
+            if not prev_result:
+                return False
+            
+            if prev_result.status != ExecutionStatus.SUCCESS:
+                self.logger.warning(f"步骤 {step.step_id} 依赖步骤 {prev_step.step_id} 未成功")
+                return False
+        
+        return True
+    
+    async def _execute_with_timeout(self, func, *args, **kwargs) -> Dict[str, Any]:
+        """
+        带超时的函数执行
+        
+        Args:
+            func: 要执行的函数
+            *args: 函数参数
+            **kwargs: 函数关键字参数
+            
+        Returns:
+            执行结果
+        """
+        try:
+            return await asyncio.wait_for(
+                func(*args, **kwargs),
+                timeout=self.config["step_timeout"]
+            )
+        except asyncio.TimeoutError:
+            self.logger.error(f"函数执行超时: {func.__name__}")
+            raise
+    
+    async def _start_monitoring(self):
+        """启动执行监控"""
+        if not self.config.get("monitoring_interval", 0) > 0:
+            return
+        
+        async def monitor():
+            while self.context and self.context.status == ExecutionStatus.RUNNING:
+                try:
+                    # 监控当前执行状态
+                    if self.context:
+                        current_step = self.context.current_step
+                        total_steps = len(self.context.plan.steps)
+                        flags_found = len(self.context.flags_found)
+                        
+                        self.logger.info(
+                            f"执行监控: 步骤 {current_step}/{total_steps}, "
+                            f"找到flag: {flags_found}, "
+                            f"运行时间: {time.time() - self.context.start_time:.1f}秒"
+                        )
+                    
+                    await asyncio.sleep(self.config["monitoring_interval"])
+                except Exception as e:
+                    self.logger.error(f"监控任务异常: {e}")
+                    break
+        
+        # 启动监控任务
+        task = asyncio.create_task(monitor())
+        self.monitoring_tasks.append(task)
+    
+    async def _stop_monitoring(self):
+        """停止执行监控"""
+        for task in self.monitoring_tasks:
+            task.cancel()
+        
+        # 等待所有任务完成
+        if self.monitoring_tasks:
+            await asyncio.gather(*self.monitoring_tasks, return_exceptions=True)
+            self.monitoring_tasks.clear()
 
 
 # 示例使用

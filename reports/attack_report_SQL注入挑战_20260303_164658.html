@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CTF攻击模拟报告 - SQL注入挑战</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1, h2, h3 { color: #333; }
+        .header { text-align: center; border-bottom: 2px solid #4CAF50; padding-bottom: 20px; margin-bottom: 30px; }
+        .summary { background: #f9f9f9; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin: 20px 0; }
+        .stat-card { background: white; padding: 15px; border-radius: 5px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #4CAF50; }
+        .vulnerabilities { margin: 20px 0; }
+        .vuln-item { background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px 15px; margin: 10px 0; }
+        .critical { border-left-color: #dc3545; background: #f8d7da; }
+        .medium { border-left-color: #ffc107; background: #fff3cd; }
+        .low { border-left-color: #28a745; background: #d4edda; }
+        .recommendations { background: #e7f3ff; padding: 20px; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #4CAF50; color: white; }
+        tr:hover { background-color: #f5f5f5; }
+        .success { color: #28a745; }
+        .warning { color: #ffc107; }
+        .danger { color: #dc3545; }
+        .timestamp { color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>CTF攻击模拟分析报告</h1>
+            <p class="timestamp">生成时间: 2026年03月03日 16:46:58</p>
+        </div>
+        
+        <div class="summary">
+            <h2>挑战概览</h2>
+            <p><strong>标题:</strong> SQL注入挑战</p>
+            <p><strong>类别:</strong> web</p>
+            <p><strong>难度:</strong> easy</p>
+            <p><strong>目标URL:</strong> <a href="http://testphp.vulnweb.com/artists.php?artist=1" target="_blank">http://testphp.vulnweb.com/artists.php?artist=1</a></p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">攻击成功率</div>
+                <div class="stat-value">100.0%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">发现漏洞数</div>
+                <div class="stat-value">1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">找到Flag数</div>
+                <div class="stat-value">1</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">执行时间</div>
+                <div class="stat-value">120.50s</div>
+            </div>
+        </div>
+        
+        <h2>执行摘要</h2>
+        <table>
+            <tr>
+                <th>指标</th>
+                <th>值</th>
+                <th>状态</th>
+            </tr>
+            <tr>
+                <td>总步骤数</td>
+                <td>2</td>
+                <td>-</td>
+            </tr>
+            <tr>
+                <td>成功步骤</td>
+                <td>2</td>
+                <td class="success">✓</td>
+            </tr>
+            <tr>
+                <td>失败步骤</td>
+                <td>0</td>
+                <td class="danger">✗</td>
+            </tr>
+            <tr>
+                <td>超时步骤</td>
+                <td>0</td>
+                <td class="warning">⚠</td>
+            </tr>
+            <tr>
+                <td>总体状态</td>
+                <td>success</td>
+                <td class="success">
+                    ✓ 成功
+                </td>
+            </tr>
+        </table>
+        
+        <h2>发现的Flag</h2>
+        <ul><li><code>flag{sql_injection_success}</code></li></ul>
+        
+        <h2>安全漏洞分析</h2>
+        <div class="vulnerabilities">
+            
+            <div class="vuln-item critical">
+                <strong>SQL Injection</strong> (critical)<br>
+                <small>步骤: 2 | 工具: sqlmap</small><br>
+                发现SQL注入漏洞
+            </div>
+            
+        </div>
+        
+        <h2>安全风险评估</h2>
+        <div class="vulnerabilities">
+            
+            <div class="vuln-item unknown">
+                <strong>Open Port</strong> (unknown)<br>
+                <small>步骤: 1</small><br>
+                端口 80 (http): 可能存在Web漏洞
+            </div>
+            
+            <div class="vuln-item critical">
+                <strong>SQL Injection</strong> (critical)<br>
+                <small>步骤: 2</small><br>
+                发现SQL注入漏洞，数据库类型: MySQL
+            </div>
+            
+        </div>
+        
+        <h2>详细步骤执行</h2>
+        <table>
+            <tr>
+                <th>步骤ID</th>
+                <th>操作</th>
+                <th>工具</th>
+                <th>状态</th>
+                <th>执行时间</th>
+                <th>Flag</th>
+            </tr>
+            
+            <tr>
+                <td>1</td>
+                <td>端口扫描</td>
+                <td>nmap_scan</td>
+                <td><span class="success">✓ 成功</span></td>
+                <td>30.20s</td>
+                <td>-</td>
+            </tr>
+            
+            <tr>
+                <td>2</td>
+                <td>SQL注入扫描</td>
+                <td>sqlmap_scan</td>
+                <td><span class="success">✓ 成功</span></td>
+                <td>90.30s</td>
+                <td><code>flag{sql_injection_success}</code></td>
+            </tr>
+            
+        </table>
+        
+        <h2>安全建议</h2>
+        <div class="recommendations">
+            <ul><li>发现以下安全漏洞，建议立即修复：</li><li>  - SQL Injection (critical): 参考相关安全最佳实践进行修复</li><li>发现以下安全风险，建议加强防护：</li><li>  - Open Port: 端口 80 (http): 可能存在Web漏洞</li><li>  - SQL Injection: 发现SQL注入漏洞，数据库类型: MySQL</li><li>攻击成功率较高，系统安全性需要加强：</li><li>  - 实施更严格的安全控制</li><li>  - 定期进行安全审计</li><li>  - 考虑实施Web应用防火墙</li></ul>
+        </div>
+        
+        <div class="timestamp" style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd;">
+            <p>报告由 CTF AI攻击模拟系统生成</p>
+            <p>仅供教育和安全测试目的使用</p>
+        </div>
+    </div>
+</body>
+</html>

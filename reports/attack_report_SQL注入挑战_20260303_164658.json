@@ -1,0 +1,101 @@
+{
+  "metadata": {
+    "generated_at": "2026-03-03T16:46:58.272404",
+    "system": "CTF AI攻击模拟系统",
+    "version": "1.0"
+  },
+  "challenge": {
+    "title": "SQL注入挑战",
+    "category": "web",
+    "difficulty": "easy",
+    "target_url": "http://testphp.vulnweb.com/artists.php?artist=1"
+  },
+  "execution_summary": {
+    "status": "success",
+    "total_time": 120.5,
+    "statistics": {
+      "total_steps": 2,
+      "successful_steps": 2,
+      "failed_steps": 0,
+      "timeout_steps": 0
+    }
+  },
+  "analysis": {
+    "success_rate": 1.0,
+    "vulnerabilities_found": 1,
+    "flags_found": 1,
+    "execution_time": 120.5,
+    "confidence": 1.0
+  },
+  "vulnerabilities": [
+    {
+      "type": "SQL Injection",
+      "severity": "critical",
+      "tool": "sqlmap",
+      "step": 2,
+      "description": "发现SQL注入漏洞"
+    }
+  ],
+  "security_risks": [
+    {
+      "type": "Open Port",
+      "description": "端口 80 (http): 可能存在Web漏洞",
+      "severity": "unknown",
+      "step": 1
+    },
+    {
+      "type": "SQL Injection",
+      "description": "发现SQL注入漏洞，数据库类型: MySQL",
+      "severity": "critical",
+      "step": 2
+    }
+  ],
+  "flags": [
+    "flag{sql_injection_success}"
+  ],
+  "step_details": [
+    {
+      "step_id": 1,
+      "action": "端口扫描",
+      "tool": "nmap_scan",
+      "status": "success",
+      "execution_time": 30.2,
+      "flag_detected": false,
+      "flag": null,
+      "output": {
+        "analysis": {
+          "security_risks": [
+            "端口 80 (http): 可能存在Web漏洞"
+          ]
+        }
+      }
+    },
+    {
+      "step_id": 2,
+      "action": "SQL注入扫描",
+      "tool": "sqlmap_scan",
+      "status": "success",
+      "execution_time": 90.3,
+      "flag_detected": true,
+      "flag": "flag{sql_injection_success}",
+      "output": {
+        "analysis": {
+          "injection_found": true,
+          "database_type": "MySQL",
+          "vulnerability_level": "critical"
+        }
+      }
+    }
+  ],
+  "recommendations": [
+    "发现以下安全漏洞，建议立即修复：",
+    "  - SQL Injection (critical): 参考相关安全最佳实践进行修复",
+    "发现以下安全风险，建议加强防护：",
+    "  - Open Port: 端口 80 (http): 可能存在Web漏洞",
+    "  - SQL Injection: 发现SQL注入漏洞，数据库类型: MySQL",
+    "攻击成功率较高，系统安全性需要加强：",
+    "  - 实施更严格的安全控制",
+    "  - 定期进行安全审计",
+    "  - 考虑实施Web应用防火墙"
+  ]
+}

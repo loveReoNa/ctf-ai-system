@@ -35,3 +35,6 @@ mypy>=1.5.0
 # 其他
 colorama>=0.4.0
 rich>=13.0.0
+
+# PDF生成
+reportlab>=4.0.0
