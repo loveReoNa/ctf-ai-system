@@ -174,20 +174,35 @@ PORT     STATE SERVICE
             
             # 测试报告生成
             try:
-                # 创建模拟上下文
+                # 创建模拟上下文，包含一个工具执行结果
+                mock_tool_result = type('MockToolResult', (), {
+                    'tool_name': 'nmap_scan',
+                    'success': True,
+                    'execution_time': 1.5,
+                    'dependencies': [],
+                    'next_tools': ['sqlmap_scan'],
+                    'output': {
+                        'parsed': {
+                            'success': True,
+                            'message': '扫描完成',
+                            'summary': {'open_ports': 3}
+                        }
+                    }
+                })()
+                
                 mock_context = type('MockContext', (), {
                     'chain_id': 'test_chain_123',
                     'target': 'test.example.com',
-                    'tools_executed': [],
+                    'tools_executed': [mock_tool_result],
                     'flags_found': ['flag{test_flag}'],
                     'start_time': 0,
                     'end_time': 100,
-                    'current_state': {}
+                    'current_state': {'chain_summary': {'total_tools': 1, 'successful_tools': 1}}
                 })()
                 
                 report = coordinator.generate_chain_report(mock_context)
                 
-                test_passed = "chain_id" in report and "target" in report
+                test_passed = "chain_id" in report and "target" in report and "success" in report
                 message = "报告生成成功" if test_passed else "报告生成失败"
                 
                 results.append({

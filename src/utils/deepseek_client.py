@@ -193,6 +193,28 @@ class DeepSeekClient:
         ]
         
         return await self.chat_completion(messages)
+    
+    async def generate_response(self, prompt: str) -> str:
+        """
+        生成对提示的响应
+        
+        Args:
+            prompt: 用户提示
+        
+        Returns:
+            AI生成的响应文本
+        """
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+        
+        result = await self.chat_completion(messages)
+        
+        if result.get("success", False):
+            return result.get("content", "")
+        else:
+            error = result.get("error", "未知错误")
+            raise Exception(f"DeepSeek API调用失败: {error}")
 
 # 全局DeepSeek客户端实例
 deepseek_client = DeepSeekClient()

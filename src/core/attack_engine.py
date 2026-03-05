@@ -92,7 +92,7 @@ class AttackExecutionEngine:
         self.config = self.config_manager.to_dict()
         
         # 初始化组件
-        self.ai_client = DeepSeekClient(self.config)
+        self.ai_client = DeepSeekClient()
         self.tool_coordinator = ToolChainCoordinator()
         
         # 攻击状态跟踪
@@ -116,9 +116,10 @@ class AttackExecutionEngine:
     async def initialize(self) -> bool:
         """初始化引擎"""
         try:
-            # 初始化AI客户端
-            if not await self.ai_client.initialize():
-                self.logger.error("AI客户端初始化失败")
+            # 初始化AI客户端（DeepSeekClient在__init__中已初始化）
+            # 检查API密钥是否有效
+            if not self.ai_client.api_key:
+                self.logger.error("AI客户端API密钥未配置")
                 return False
             
             # 初始化工具协调器
@@ -463,10 +464,16 @@ class AttackExecutionEngine:
             step.end_time = time.time()
             
             # 记录执行历史
+            # 安全地获取状态值，处理字符串或枚举
+            if hasattr(step.status, 'value'):
+                status_value = step.status.value
+            else:
+                status_value = str(step.status)
+            
             execution_record = {
                 "step_id": step.step_id,
                 "description": step.description,
-                "status": step.status.value,
+                "status": status_value,
                 "execution_time": step.end_time - step.start_time,
                 "result": step.result,
                 "timestamp": time.time()
@@ -474,7 +481,7 @@ class AttackExecutionEngine:
             
             context.execution_history.append(execution_record)
             
-            self.logger.info(f"步骤完成: {step.step_id}, 状态: {step.status.value}, "
+            self.logger.info(f"步骤完成: {step.step_id}, 状态: {status_value}, "
                            f"耗时: {step.end_time - step.start_time:.2f}秒")
     
     async def _execute_tool_step(self, context: AttackContext, step: AttackStep) -> Dict[str, Any]:
@@ -769,10 +776,22 @@ class AttackExecutionEngine:
         """格式化攻击状态"""
         plan = context.plan
         
+        # 安全地获取状态值，处理字符串或枚举
+        if hasattr(plan.status, 'value'):
+            status_value = plan.status.value
+        else:
+            status_value = str(plan.status)
+        
+        # 安全地获取阶段值
+        if hasattr(context.current_phase, 'value'):
+            phase_value = context.current_phase.value
+        else:
+            phase_value = str(context.current_phase)
+        
         return {
             "attack_id": context.attack_id,
             "target": context.target,
-            "status": plan.status.value,
+            "status": status_value,
             "current_step": plan.current_step_index,
             "total_steps": len(plan.steps),
             "flags_found": len(plan.flags_found),
@@ -781,7 +800,7 @@ class AttackExecutionEngine:
             "end_time": context.end_time,
             "execution_time": context.end_time - context.start_time if context.end_time else time.time() - context.start_time,
             "success": context.success,
-            "current_phase": context.current_phase.value
+            "current_phase": phase_value
         }
     
     def get_engine_metrics(self) -> Dict[str, Any]:

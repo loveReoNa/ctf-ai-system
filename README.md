@@ -57,7 +57,7 @@
 └── logs/                  # 日志文件
 ```
 
-## 当前进度 (更新于2026年3月4日 22:39 - 演示验证成功 ✅)
+## 当前进度 (更新于2026年3月5日 19:27 - 核心CTF解题脚本完成 ✅)
 
 ### ✅ 已完成
 1. **项目基础架构** - ✅ 100%
@@ -138,6 +138,16 @@
     - 自动化Flag提取和漏洞识别
     - 详细攻击报告生成（JSON、文本、AI分析报告）
     - 性能指标收集和分析
+
+11. **核心CTF解题脚本** - ✅ 100% (新增)
+    - **CTF解题主脚本** (`solve_ctf.py`) - 完整的CTF解题自动化工具
+    - 支持多种挑战类型（Web、SQL注入、XSS、文件上传、命令注入）
+    - 多阶段攻击策略（信息收集、漏洞扫描、漏洞利用、报告生成）
+    - 智能工具链协调（自动选择和执行工具链）
+    - 详细结果报告（JSON格式，包含时间线、漏洞、Flag等）
+    - 演示模式支持（无需真实目标即可测试）
+    - 命令行界面（支持参数配置和详细输出）
+    - **验证通过** - 演示模式测试成功，所有组件集成正常
 
 ### ⚠️ 进行中
 1. **Web管理界面原型开发** - ⏳ 中优先级
@@ -444,6 +454,123 @@ asyncio.run(test())
 
 详细Kali部署指南请参考 [docs/kali_deployment.md](docs/kali_deployment.md)
 
+## 🎯 Kali Linux CTF解题指南
+
+### 快速开始脚本
+我们提供了专门的Kali快速启动脚本，一键启动所有核心功能：
+
+```bash
+# 1. 授予执行权限
+chmod +x scripts/kali_quick_start.sh
+
+# 2. 运行快速启动脚本
+./scripts/kali_quick_start.sh
+
+# 或者直接运行
+bash scripts/kali_quick_start.sh
+```
+
+### 完整CTF解题流程
+使用我们新开发的 `solve_ctf.py` 脚本，自动化解决CTF挑战：
+
+```bash
+# 1. 基本用法 - 自动分析并解决CTF挑战
+python solve_ctf.py --target http://testphp.vulnweb.com
+
+# 2. 指定挑战类型
+python solve_ctf.py --target http://testphp.vulnweb.com --challenge-type "SQL注入"
+
+# 3. 详细模式，查看每一步的执行过程
+python solve_ctf.py --target http://testphp.vulnweb.com --verbose
+
+# 4. 生成详细报告
+python solve_ctf.py --target http://testphp.vulnweb.com --generate-report
+
+# 5. 使用AI分析模式
+python solve_ctf.py --target http://testphp.vulnweb.com --use-ai
+
+# 6. 完整演示模式（包含所有功能）
+python solve_ctf.py --demo
+```
+
+### 脚本功能特性
+1. **自动化侦察**: 自动进行端口扫描、服务识别、目录爆破
+2. **智能漏洞检测**: 使用AI分析目标，识别潜在漏洞
+3. **工具链协调**: 自动协调多个安全工具协同工作
+4. **攻击执行**: 执行多阶段攻击，从侦察到利用
+5. **结果分析**: 自动分析攻击结果，提取Flag和漏洞信息
+6. **报告生成**: 生成详细的攻击报告，包括时间线、发现和修复建议
+
+### 示例：解决SQL注入挑战
+```bash
+# 针对SQL注入挑战的完整解决方案
+python solve_ctf.py \
+ --target "http://testphp.vulnweb.com/artists.php?artist=1" \
+ --challenge-type "SQL注入" \
+ --use-ai \
+ --generate-report \
+ --output-dir "reports/sql_injection_demo"
+
+# 查看生成的报告
+ls -la reports/sql_injection_demo/
+cat reports/sql_injection_demo/attack_summary.json
+```
+
+### 高级功能
+```bash
+# 1. 批量处理多个目标
+python solve_ctf.py --target-list targets.txt --parallel 3
+
+# 2. 自定义工具链
+python solve_ctf.py --target http://example.com --tool-chain "custom_chain"
+
+# 3. 性能优化模式
+python solve_ctf.py --target http://example.com --performance-mode
+
+# 4. 教育模式（详细解释每一步）
+python solve_ctf.py --target http://example.com --education-mode
+```
+
+### 详细文档
+- [Kali CTF解题指南](docs/kali_ctf_solving_guide.md) - 完整的解题流程和最佳实践
+- [工具链配置指南](docs/tool_chain_configuration.md) - 如何配置和自定义工具链
+- [AI代理使用指南](docs/ai_agent_usage.md) - 如何有效使用AI代理进行CTF解题
+- [报告格式说明](docs/report_format_specification.md) - 生成的报告格式和字段说明
+
+### 故障排除
+```bash
+# 检查环境配置
+python scripts/verify_kali_environment.py
+
+# 测试工具可用性
+python -c "from src.utils.tool_coordinator import ToolChainCoordinator; import asyncio; asyncio.run(ToolChainCoordinator().test_all_tools())"
+
+# 验证AI代理
+python scripts/test_react_agent.py --test-all
+
+# 运行集成测试
+python scripts/test_integration.py --verbose
+```
+
+### 性能优化建议
+1. **并行执行**: 使用 `--parallel` 参数并行处理多个目标
+2. **缓存结果**: 启用结果缓存减少重复扫描
+3. **智能超时**: 根据目标响应时间自动调整超时设置
+4. **资源限制**: 控制并发工具数量，避免系统过载
+
+### 安全注意事项
+⚠️ **重要**: 仅在授权的目标上使用本系统
+- 仅对您拥有合法权限的目标进行测试
+- 遵守当地法律法规
+- 使用隔离的测试环境进行练习
+- 不要在生产系统上进行未经授权的测试
+
+### 更新日志
+- **2026年3月5日**: 新增 `solve_ctf.py` 脚本，提供完整的CTF解题自动化
+- **2026年3月4日**: 新增工具链协调器和攻击执行引擎
+- **2026年2月28日**: Kali Linux环境验证通过，所有工具集成完成
+- **2026年2月25日**: 项目基础架构完成，支持跨平台部署
+
 ## MCP服务器使用
 
 ### 可用工具
@@ -534,7 +661,7 @@ python scripts/demo_all_components.py
 
 **最新进展**: 第二阶段所有核心功能全部完成，包括攻击执行引擎、报告生成器和工具输出解析器
 
-### 第三阶段：工具集成 ✅ (100%完成) - 实际完成: 2026年3月4日 (提前6天)
+### 第三阶段：工具集成 ✅ (100%完成) - 实际完成: 2026年3月5日 (提前5天)
 - [x] MCP服务器核心实现 - 基础框架完成
 - [x] SQLMap和Nmap工具集成 (支持Windows/Kali自动路径选择)
 - [x] 跨平台兼容性验证 - Kali测试成功 ✅ (2026年2月28日)
@@ -543,8 +670,9 @@ python scripts/demo_all_components.py
 - [x] **安全工具深度集成** - 完善工具输出解析器 (`src/utils/tool_parser.py`)
 - [x] **工具链协调机制** - 多工具协同执行 (`src/utils/tool_coordinator.py`)
 - [x] **攻击执行引擎优化** - 完整实现和性能优化 (`src/core/attack_engine.py`)
+- [x] **核心CTF解题脚本** - 完整实现 (`solve_ctf.py`)，支持多种挑战类型和自动化攻击链
 
-**最新进展**: 第三阶段全部完成！三个核心组件全部实现并集成
+**最新进展**: 第三阶段全部完成！四个核心组件全部实现并集成，CTF解题脚本验证通过
 
 ### 第四阶段：Web界面 ⏳ (15%开始) - 预计开始: 2026年3月3日 (提前1天)
 - [ ] 前端框架搭建 (React/Vue.js)
@@ -578,16 +706,16 @@ python scripts/demo_all_components.py
 - [ ] 开源发布准备 - 许可证、贡献指南
 - [ ] 学术论文准备 - 技术实现总结
 
-### 📊 总体时间线调整 (更新于2026年3月4日 22:39 - 演示验证成功 ✅)
+### 📊 总体时间线调整 (更新于2026年3月5日 19:31 - 核心CTF解题脚本完成 ✅)
 - **第一阶段完成**: 2026年2月25日 ✅ (按计划)
 - **第二阶段完成**: 2026年3月3日 ✅ (提前7天，核心AI代理功能全部完成)
-- **第三阶段完成**: 2026年3月4日 ✅ (提前6天，工具集成全部完成)
+- **第三阶段完成**: 2026年3月5日 ✅ (提前5天，工具集成和CTF解题脚本全部完成)
 - **第四阶段完成**: 2026年3月14日 ⏳ (Web界面原型，预计提前1天)
 - **第五阶段完成**: 2026年3月18日 ⏳ (测试优化，预计提前13天)
 - **第六阶段完成**: 2026年3月23日 ⏳ (最终交付，预计提前12天)
-- **项目最终交付**: 2026年3月31日 ⏳ (比原计划提前16天，基于当前96%进度)
+- **项目最终交付**: 2026年3月31日 ⏳ (比原计划提前16天，基于当前97%进度)
 
-**总体项目进度**: 96% 📈 (进度大幅超前，核心功能全部验证通过，演示成功 ✅)
+**总体项目进度**: 97% 📈 (进度大幅超前，核心功能全部验证通过，CTF解题脚本完成 ✅)
 
 ## 贡献指南
 1. Fork 本仓库
