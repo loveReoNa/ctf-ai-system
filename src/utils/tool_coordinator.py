@@ -73,10 +73,10 @@ class ToolChainCoordinator:
             "conditional": self._execute_conditional
         }
         
-        # 预定义工具链
+        # 预定义工具链（只包含实际可用的工具）
         self.predefined_chains = {
-            "web_recon": ["nmap_scan", "dirb_scan", "sqlmap_scan", "xss_scan"],
-            "full_scan": ["nmap_scan", "nikto_scan", "sqlmap_scan", "wpscan"],
+            "web_recon": ["nmap_scan", "sqlmap_scan"],  # 移除了dirb_scan和xss_scan
+            "full_scan": ["nmap_scan", "sqlmap_scan"],  # 移除了nikto_scan和wpscan
             "quick_scan": ["nmap_scan", "sqlmap_scan"]
         }
         
@@ -366,24 +366,33 @@ class ToolChainCoordinator:
     
     async def _check_dependencies(self, tool_name: str, context: ToolChainContext) -> bool:
         """检查工具依赖关系"""
-        if tool_name not in self.tool_dependencies:
+        # 查找所有以当前工具为目标工具的依赖关系
+        # 即检查哪些工具需要在当前工具之前执行
+        required_dependencies = []
+        
+        for source_tool, deps in self.tool_dependencies.items():
+            for dep in deps:
+                if dep.target_tool == tool_name:
+                    required_dependencies.append((source_tool, dep))
+        
+        # 如果没有依赖关系，直接返回True
+        if not required_dependencies:
             return True
         
-        dependencies = self.tool_dependencies[tool_name]
-        
-        for dep in dependencies:
+        # 检查所有依赖关系
+        for source_tool, dep in required_dependencies:
             # 查找依赖工具的执行结果
             dep_result = next(
-                (r for r in context.tools_executed if r.tool_name == dep.source_tool),
+                (r for r in context.tools_executed if r.tool_name == source_tool),
                 None
             )
             
             if not dep_result:
-                self.logger.warning(f"依赖工具 {dep.source_tool} 未执行")
+                self.logger.warning(f"依赖工具 {source_tool} 未执行")
                 return False
             
             if not dep_result.success and dep.dependency_type == ToolDependencyType.REQUIRED:
-                self.logger.warning(f"必须依赖工具 {dep.source_tool} 执行失败")
+                self.logger.warning(f"必须依赖工具 {source_tool} 执行失败")
                 return False
             
             # 检查条件
