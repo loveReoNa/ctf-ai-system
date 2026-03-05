@@ -7,9 +7,11 @@
 import asyncio
 import json
 import time
+import re
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
+from urllib.parse import urlparse
 
 from src.utils.logger import logger
 from src.utils.tool_parser import ToolParserFactory
@@ -315,26 +317,88 @@ class ToolChainCoordinator:
                 next_tools=[]
             )
     
+    def _parse_target_url(self, target: str) -> Dict[str, Any]:
+        """解析目标URL，提取主机名和端口"""
+        result = {
+            "original": target,
+            "hostname": target,
+            "port": None,
+            "is_url": False
+        }
+        
+        # 检查是否是URL格式
+        if target.startswith(("http://", "https://")):
+            result["is_url"] = True
+            try:
+                parsed = urlparse(target)
+                result["hostname"] = parsed.hostname or target
+                result["port"] = parsed.port
+                
+                # 如果没有端口但有协议，设置默认端口
+                if not result["port"]:
+                    if parsed.scheme == "https":
+                        result["port"] = 443
+                    elif parsed.scheme == "http":
+                        result["port"] = 80
+            except Exception as e:
+                self.logger.warning(f"URL解析失败: {e}")
+        
+        # 如果不是URL，尝试从字符串中提取主机名和端口
+        else:
+            # 检查是否有端口号（格式如: hostname:port）
+            match = re.match(r'^([^:]+):(\d+)$', target)
+            if match:
+                result["hostname"] = match.group(1)
+                result["port"] = int(match.group(2))
+        
+        return result
+    
     def _build_tool_parameters(self, tool_name: str, target: str,
                               context: ToolChainContext, params: Dict[str, Any]) -> Dict[str, Any]:
         """构建工具参数"""
-        base_params = {"target": target}
+        # 解析目标
+        target_info = self._parse_target_url(target)
         
-        # 工具特定参数
+        # 根据工具类型构建参数
         if tool_name == "nmap_scan":
+            # Nmap需要主机名，而不是完整的URL
+            base_params = {"target": target_info["hostname"]}
+            
+            # 如果有特定端口，添加到扫描端口
+            ports = params.get("nmap_ports", "80,443,8080,8443")
+            if target_info["port"]:
+                # 将特定端口添加到扫描列表中
+                port_list = ports.split(",")
+                if str(target_info["port"]) not in port_list:
+                    port_list.append(str(target_info["port"]))
+                ports = ",".join(port_list)
+            
             base_params.update({
-                "ports": params.get("nmap_ports", "80,443,8080,8443"),
+                "ports": ports,
                 "scan_type": params.get("nmap_scan_type", "syn")
             })
+            
         elif tool_name == "sqlmap_scan":
-            # 从上下文中获取URL（如果有）
+            # SQLMap需要完整的URL
             url = self._extract_url_from_context(context, target)
+            if not url and target_info["is_url"]:
+                url = target
+            elif not url:
+                # 构建默认URL
+                port_suffix = f":{target_info['port']}" if target_info["port"] else ""
+                url = f"http://{target_info['hostname']}{port_suffix}"
+            
+            base_params = {
+                "target": target_info["hostname"],  # 保持向后兼容
+                "url": url
+            }
             base_params.update({
-                "url": url or target,
                 "method": params.get("sqlmap_method", "GET"),
                 "level": params.get("sqlmap_level", 1),
                 "risk": params.get("sqlmap_risk", 1)
             })
+        else:
+            base_params = {"target": target}
         
         # 合并自定义参数
         if tool_name in params:
@@ -344,6 +408,9 @@ class ToolChainCoordinator:
     
     def _extract_url_from_context(self, context: ToolChainContext, target: str) -> Optional[str]:
         """从上下文中提取URL"""
+        # 首先解析目标
+        target_info = self._parse_target_url(target)
+        
         # 查找之前的Nmap扫描结果
         for result in context.tools_executed:
             if result.tool_name == "nmap_scan" and result.success:
@@ -356,13 +423,18 @@ class ToolChainCoordinator:
                         for port in ports:
                             if port.get("port") in [80, 443, 8080, 8443] and port.get("state") == "open":
                                 protocol = "https" if port["port"] in [443, 8443] else "http"
-                                return f"{protocol}://{target}:{port['port']}"
+                                port_num = port["port"]
+                                # 如果目标已经有端口，使用目标的端口
+                                if target_info["port"]:
+                                    port_num = target_info["port"]
+                                return f"{protocol}://{target_info['hostname']}:{port_num}"
         
-        # 如果没有找到，使用默认URL
-        if target.startswith("http"):
+        # 如果没有找到，使用解析后的信息构建URL
+        if target_info["is_url"]:
             return target
         else:
-            return f"http://{target}"
+            port_suffix = f":{target_info['port']}" if target_info["port"] else ""
+            return f"http://{target_info['hostname']}{port_suffix}"
     
     async def _check_dependencies(self, tool_name: str, context: ToolChainContext) -> bool:
         """检查工具依赖关系"""
