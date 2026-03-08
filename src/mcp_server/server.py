@@ -17,6 +17,7 @@ from mcp.client.stdio import stdio_client
 from src.utils.logger import logger, LoggerMixin
 from src.utils.config_manager import config
 from src.utils.tool_parser import tool_parser_factory
+from src.mcp_server.tools.sqlmap_wrapper import sqlmap_wrapper
 
 
 def get_tool_path(tool_name: str) -> str:
@@ -123,33 +124,27 @@ class SQLMapTool(CTFMCPTool):
             
             self.logger.info(f"开始SQLMap扫描: {url}")
             
-            # 构建命令
-            cmd = [self.sqlmap_path, "-u", url, f"--level={level}", f"--risk={risk}", "--batch"]
-            
-            if method.upper() == "POST" and data:
-                cmd.extend(["--data", data])
-            
-            # 执行命令
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            stdout, stderr = await process.communicate()
-            
-            result = {
-                "success": process.returncode == 0,
-                "return_code": process.returncode,
-                "stdout": stdout.decode('utf-8', errors='ignore'),
-                "stderr": stderr.decode('utf-8', errors='ignore'),
-                "command": " ".join(cmd)
+            # 使用sqlmap_wrapper进行扫描
+            scan_options = {
+                "level": level,
+                "risk": risk,
+                "timeout": 300  # 5分钟超时
             }
             
-            if process.returncode == 0:
-                self.logger.info(f"SQLMap扫描完成: {url}")
-            else:
-                self.logger.warning(f"SQLMap扫描失败: {url}")
+            if method.upper() == "POST" and data:
+                scan_options["data"] = data
+            
+            # 执行扫描
+            result = await sqlmap_wrapper.scan(url, **scan_options)
+            
+            # 确保结果包含必要的字段
+            if "success" not in result:
+                result["success"] = True if result.get("return_code", 1) == 0 else False
+            
+            if "command" not in result:
+                result["command"] = f"sqlmap -u {url} --level={level} --risk={risk} --batch --random-agent --threads=10"
+            
+            self.logger.info(f"SQLMap扫描完成: {url}, 成功: {result.get('success', False)}")
             
             return result
             
@@ -157,7 +152,10 @@ class SQLMapTool(CTFMCPTool):
             self.logger.error(f"SQLMap执行错误: {e}")
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
+                "stdout": "",
+                "stderr": str(e),
+                "return_code": 1
             }
 
 
@@ -453,7 +451,7 @@ class CTFMCPServer:
         tools = await self.handle_list_tools()
         self.logger.info(f"可用工具: {json.dumps(tools, indent=2, ensure_ascii=False)}")
         
-        # 测试SQLMap工具（模拟）
+        # 测试SQLMap工具
         if "sqlmap_scan" in self.tool_manager.tools:
             test_args = {
                 "url": "http://testphp.vulnweb.com/artists.php?artist=1",
@@ -463,9 +461,18 @@ class CTFMCPServer:
             }
             
             self.logger.info(f"测试SQLMap工具，参数: {test_args}")
-            # 注意：实际执行需要sqlmap安装，这里只演示框架
-            # result = await self.handle_call_tool("sqlmap_scan", test_args)
-            # self.logger.info(f"测试结果: {json.dumps(result, indent=2, ensure_ascii=False)}")
+            try:
+                # 实际执行测试
+                result = await self.handle_call_tool("sqlmap_scan", test_args)
+                self.logger.info(f"测试结果: {json.dumps(result, indent=2, ensure_ascii=False)}")
+                
+                # 检查结果
+                if result.get("success", False):
+                    self.logger.info("SQLMap工具测试成功")
+                else:
+                    self.logger.warning(f"SQLMap工具测试失败: {result.get('error', '未知错误')}")
+            except Exception as e:
+                self.logger.error(f"SQLMap工具测试异常: {e}")
         
         self.logger.info("测试模式完成")
 
