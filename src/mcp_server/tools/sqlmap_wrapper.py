@@ -20,7 +20,16 @@ class SQLMapWrapper:
     """SQLMap高级包装器"""
     
     def __init__(self):
-        self.sqlmap_path = config.get("tools.sqlmap.windows_path", "sqlmap")
+        # 根据操作系统选择正确的路径
+        import platform
+        system = platform.system()
+        
+        if system == "Windows":
+            self.sqlmap_path = config.get("tools.sqlmap.windows_path", "sqlmap")
+        else:
+            # Linux/macOS/Kali
+            self.sqlmap_path = config.get("tools.sqlmap.path", "sqlmap")
+            
         self.logger = logger.getChild("sqlmap_wrapper")
         self.default_options = {
             "batch": True,  # 无需交互

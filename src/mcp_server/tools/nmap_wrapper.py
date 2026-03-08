@@ -20,7 +20,16 @@ class NmapWrapper:
     """Nmap高级包装器"""
     
     def __init__(self):
-        self.nmap_path = config.get("tools.nmap.windows_path", "nmap")
+        # 根据操作系统选择正确的路径
+        import platform
+        system = platform.system()
+        
+        if system == "Windows":
+            self.nmap_path = config.get("tools.nmap.windows_path", "nmap")
+        else:
+            # Linux/macOS/Kali
+            self.nmap_path = config.get("tools.nmap.path", "nmap")
+            
         self.logger = logger.getChild("nmap_wrapper")
         self.default_options = {
             "top_ports": 100,
