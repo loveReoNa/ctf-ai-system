@@ -68,8 +68,8 @@ class CTFMCPTool:
         }
 
 
-class SQLMapTool(CTFMCPTool):
-    """SQLMap工具包装器"""
+class SQLMapScanTool(CTFMCPTool):
+    """SQLMap扫描工具"""
     
     def __init__(self):
         super().__init__(
@@ -108,6 +108,10 @@ class SQLMapTool(CTFMCPTool):
                     "minimum": 1,
                     "maximum": 3,
                     "default": 1
+                },
+                "parameter": {
+                    "type": "string",
+                    "description": "指定测试参数"
                 }
             },
             "required": ["url"]
@@ -121,6 +125,7 @@ class SQLMapTool(CTFMCPTool):
             data = kwargs.get("data")
             level = kwargs.get("level", 1)
             risk = kwargs.get("risk", 1)
+            parameter = kwargs.get("parameter")
             
             self.logger.info(f"开始SQLMap扫描: {url}")
             
@@ -134,6 +139,9 @@ class SQLMapTool(CTFMCPTool):
             if method.upper() == "POST" and data:
                 scan_options["data"] = data
             
+            if parameter:
+                scan_options["parameter"] = parameter
+            
             # 执行扫描
             result = await sqlmap_wrapper.scan(url, **scan_options)
             
@@ -142,7 +150,10 @@ class SQLMapTool(CTFMCPTool):
                 result["success"] = True if result.get("return_code", 1) == 0 else False
             
             if "command" not in result:
-                result["command"] = f"sqlmap -u {url} --level={level} --risk={risk} --batch --random-agent --threads=10"
+                cmd = f"sqlmap -u {url} --level={level} --risk={risk} --batch --random-agent --threads=10"
+                if parameter:
+                    cmd += f" -p {parameter}"
+                result["command"] = cmd
             
             self.logger.info(f"SQLMap扫描完成: {url}, 成功: {result.get('success', False)}")
             
@@ -156,6 +167,490 @@ class SQLMapTool(CTFMCPTool):
                 "stdout": "",
                 "stderr": str(e),
                 "return_code": 1
+            }
+
+
+class SQLMapRequestFileTool(CTFMCPTool):
+    """SQLMap请求文件扫描工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_request_file",
+            description="使用请求文件进行SQLMap扫描"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "request_file": {
+                    "type": "string",
+                    "description": "请求文件路径"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                },
+                "parameter": {
+                    "type": "string",
+                    "description": "指定测试参数"
+                }
+            },
+            "required": ["request_file"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """执行SQLMap请求文件扫描"""
+        try:
+            request_file = kwargs.get("request_file")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            parameter = kwargs.get("parameter")
+            
+            self.logger.info(f"开始SQLMap请求文件扫描: {request_file}")
+            
+            # 使用sqlmap_wrapper进行扫描
+            scan_options = {
+                "level": level,
+                "risk": risk,
+                "timeout": 300
+            }
+            
+            if parameter:
+                scan_options["parameter"] = parameter
+            
+            # 执行扫描
+            result = await sqlmap_wrapper.scan_with_request_file(request_file, **scan_options)
+            
+            # 确保结果包含必要的字段
+            if "success" not in result:
+                result["success"] = True if result.get("return_code", 1) == 0 else False
+            
+            if "command" not in result:
+                cmd = f"sqlmap -r {request_file} --level={level} --risk={risk} --batch --random-agent"
+                if parameter:
+                    cmd += f" -p {parameter}"
+                result["command"] = cmd
+            
+            self.logger.info(f"SQLMap请求文件扫描完成: {request_file}, 成功: {result.get('success', False)}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"SQLMap请求文件扫描错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "stdout": "",
+                "stderr": str(e),
+                "return_code": 1
+            }
+
+
+class SQLMapGetDBsTool(CTFMCPTool):
+    """SQLMap获取数据库工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_get_dbs",
+            description="获取数据库列表"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                }
+            },
+            "required": ["url"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """获取数据库列表"""
+        try:
+            url = kwargs.get("url")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            
+            self.logger.info(f"获取数据库列表: {url}")
+            
+            # 使用sqlmap_wrapper获取数据库
+            scan_options = {
+                "level": level,
+                "risk": risk
+            }
+            
+            databases = await sqlmap_wrapper.get_dbs(url, **scan_options)
+            
+            result = {
+                "success": True,
+                "databases": databases,
+                "count": len(databases),
+                "command": f"sqlmap -u {url} --dbs --level={level} --risk={risk} --batch"
+            }
+            
+            self.logger.info(f"获取数据库列表完成: {url}, 找到 {len(databases)} 个数据库")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取数据库列表错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "databases": []
+            }
+
+
+class SQLMapGetTablesTool(CTFMCPTool):
+    """SQLMap获取表工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_get_tables",
+            description="获取数据库表列表"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "database": {
+                    "type": "string",
+                    "description": "数据库名称"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                }
+            },
+            "required": ["url", "database"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """获取表列表"""
+        try:
+            url = kwargs.get("url")
+            database = kwargs.get("database")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            
+            self.logger.info(f"获取表列表: {url}, 数据库: {database}")
+            
+            # 使用sqlmap_wrapper获取表
+            scan_options = {
+                "level": level,
+                "risk": risk
+            }
+            
+            tables = await sqlmap_wrapper.get_tables(url, database, **scan_options)
+            
+            result = {
+                "success": True,
+                "database": database,
+                "tables": tables,
+                "count": len(tables),
+                "command": f"sqlmap -u {url} -D {database} --tables --level={level} --risk={risk} --batch"
+            }
+            
+            self.logger.info(f"获取表列表完成: {database}, 找到 {len(tables)} 个表")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取表列表错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "database": database,
+                "tables": []
+            }
+
+
+class SQLMapGetColumnsTool(CTFMCPTool):
+    """SQLMap获取列工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_get_columns",
+            description="获取表列列表"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "database": {
+                    "type": "string",
+                    "description": "数据库名称"
+                },
+                "table": {
+                    "type": "string",
+                    "description": "表名称"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                }
+            },
+            "required": ["url", "database", "table"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """获取列列表"""
+        try:
+            url = kwargs.get("url")
+            database = kwargs.get("database")
+            table = kwargs.get("table")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            
+            self.logger.info(f"获取列列表: {url}, 数据库: {database}, 表: {table}")
+            
+            # 使用sqlmap_wrapper获取列
+            scan_options = {
+                "level": level,
+                "risk": risk
+            }
+            
+            columns = await sqlmap_wrapper.get_columns(url, database, table, **scan_options)
+            
+            result = {
+                "success": True,
+                "database": database,
+                "table": table,
+                "columns": columns,
+                "count": len(columns),
+                "command": f"sqlmap -u {url} -D {database} -T {table} --columns --level={level} --risk={risk} --batch"
+            }
+            
+            self.logger.info(f"获取列列表完成: {database}.{table}, 找到 {len(columns)} 个列")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"获取列列表错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "database": database,
+                "table": table,
+                "columns": []
+            }
+
+
+class SQLMapDumpTableTool(CTFMCPTool):
+    """SQLMap转储表工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_dump_table",
+            description="转储表数据"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "database": {
+                    "type": "string",
+                    "description": "数据库名称"
+                },
+                "table": {
+                    "type": "string",
+                    "description": "表名称"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                }
+            },
+            "required": ["url", "database", "table"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """转储表数据"""
+        try:
+            url = kwargs.get("url")
+            database = kwargs.get("database")
+            table = kwargs.get("table")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            
+            self.logger.info(f"转储表数据: {url}, 数据库: {database}, 表: {table}")
+            
+            # 使用sqlmap_wrapper转储表
+            scan_options = {
+                "level": level,
+                "risk": risk
+            }
+            
+            dump_result = await sqlmap_wrapper.dump_table(url, database, table, **scan_options)
+            
+            # 添加命令信息
+            dump_result["command"] = f"sqlmap -u {url} -D {database} -T {table} --dump --level={level} --risk={risk} --batch"
+            
+            self.logger.info(f"转储表数据完成: {database}.{table}, 成功: {dump_result.get('success', False)}")
+            
+            return dump_result
+            
+        except Exception as e:
+            self.logger.error(f"转储表数据错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "database": database,
+                "table": table,
+                "data": []
+            }
+
+
+class SQLMapAutoExploitTool(CTFMCPTool):
+    """SQLMap自动利用工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="sqlmap_auto_exploit",
+            description="自动利用SQL注入漏洞"
+        )
+        self.sqlmap_path = get_tool_path("sqlmap")
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "level": {
+                    "type": "integer",
+                    "description": "测试等级 (1-5)",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "default": 1
+                },
+                "risk": {
+                    "type": "integer",
+                    "description": "风险等级 (1-3)",
+                    "minimum": 1,
+                    "maximum": 3,
+                    "default": 1
+                }
+            },
+            "required": ["url"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """自动利用SQL注入漏洞"""
+        try:
+            url = kwargs.get("url")
+            level = kwargs.get("level", 1)
+            risk = kwargs.get("risk", 1)
+            
+            self.logger.info(f"开始自动利用SQL注入: {url}")
+            
+            # 使用sqlmap_wrapper自动利用
+            scan_options = {
+                "level": level,
+                "risk": risk,
+                "timeout": 600  # 10分钟超时
+            }
+            
+            exploit_result = await sqlmap_wrapper.auto_exploit(url, **scan_options)
+            
+            # 添加命令信息
+            exploit_result["command"] = f"sqlmap -u {url} --auto-exploit --level={level} --risk={risk} --batch"
+            
+            self.logger.info(f"自动利用完成: {url}, 成功: {exploit_result.get('success', False)}")
+            
+            return exploit_result
+            
+        except Exception as e:
+            self.logger.error(f"自动利用错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "target": url,
+                "steps": [],
+                "databases": [],
+                "tables": {},
+                "data": {},
+                "flag": None
             }
 
 
@@ -253,13 +748,61 @@ class CTFMCPToolManager(LoggerMixin):
     
     def _register_tools(self):
         """注册所有可用工具"""
-        # 注册SQLMap工具
+        # 注册SQLMap扫描工具
         try:
-            sqlmap_tool = SQLMapTool()
-            self.tools[sqlmap_tool.name] = sqlmap_tool
-            self.log_info(f"工具注册成功: {sqlmap_tool.name}")
+            sqlmap_scan_tool = SQLMapScanTool()
+            self.tools[sqlmap_scan_tool.name] = sqlmap_scan_tool
+            self.log_info(f"工具注册成功: {sqlmap_scan_tool.name}")
         except Exception as e:
-            self.log_error(f"SQLMap工具注册失败: {e}")
+            self.log_error(f"SQLMap扫描工具注册失败: {e}")
+        
+        # 注册SQLMap请求文件工具
+        try:
+            sqlmap_request_file_tool = SQLMapRequestFileTool()
+            self.tools[sqlmap_request_file_tool.name] = sqlmap_request_file_tool
+            self.log_info(f"工具注册成功: {sqlmap_request_file_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap请求文件工具注册失败: {e}")
+        
+        # 注册SQLMap获取数据库工具
+        try:
+            sqlmap_get_dbs_tool = SQLMapGetDBsTool()
+            self.tools[sqlmap_get_dbs_tool.name] = sqlmap_get_dbs_tool
+            self.log_info(f"工具注册成功: {sqlmap_get_dbs_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap获取数据库工具注册失败: {e}")
+        
+        # 注册SQLMap获取表工具
+        try:
+            sqlmap_get_tables_tool = SQLMapGetTablesTool()
+            self.tools[sqlmap_get_tables_tool.name] = sqlmap_get_tables_tool
+            self.log_info(f"工具注册成功: {sqlmap_get_tables_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap获取表工具注册失败: {e}")
+        
+        # 注册SQLMap获取列工具
+        try:
+            sqlmap_get_columns_tool = SQLMapGetColumnsTool()
+            self.tools[sqlmap_get_columns_tool.name] = sqlmap_get_columns_tool
+            self.log_info(f"工具注册成功: {sqlmap_get_columns_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap获取列工具注册失败: {e}")
+        
+        # 注册SQLMap转储表工具
+        try:
+            sqlmap_dump_table_tool = SQLMapDumpTableTool()
+            self.tools[sqlmap_dump_table_tool.name] = sqlmap_dump_table_tool
+            self.log_info(f"工具注册成功: {sqlmap_dump_table_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap转储表工具注册失败: {e}")
+        
+        # 注册SQLMap自动利用工具
+        try:
+            sqlmap_auto_exploit_tool = SQLMapAutoExploitTool()
+            self.tools[sqlmap_auto_exploit_tool.name] = sqlmap_auto_exploit_tool
+            self.log_info(f"工具注册成功: {sqlmap_auto_exploit_tool.name}")
+        except Exception as e:
+            self.log_error(f"SQLMap自动利用工具注册失败: {e}")
         
         # 注册Nmap工具
         try:
