@@ -60,13 +60,10 @@ class SQLMapWrapper:
             # 构建命令
             cmd = self._build_command(url, options)
             
-            # 创建临时文件用于输出
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.json', delete=False) as tmp_file:
-                output_file = tmp_file.name
-                cmd.extend(["--output-dir", str(Path(output_file).parent)])
-            
-            # 添加JSON输出格式
-            cmd.append("--output-format=json")
+            # 创建临时目录用于输出
+            import tempfile
+            output_dir = tempfile.mkdtemp(prefix="sqlmap_")
+            cmd.extend(["--output-dir", output_dir])
             
             self.logger.debug(f"SQLMap命令: {' '.join(cmd)}")
             
@@ -93,11 +90,12 @@ class SQLMapWrapper:
                 }
             
             # 解析结果
-            result = self._parse_output(stdout, stderr, process.returncode, output_file)
+            result = self._parse_output(stdout, stderr, process.returncode, output_dir)
             
-            # 清理临时文件
+            # 清理临时目录
             try:
-                Path(output_file).unlink(missing_ok=True)
+                import shutil
+                shutil.rmtree(output_dir, ignore_errors=True)
             except:
                 pass
             
@@ -159,7 +157,7 @@ class SQLMapWrapper:
                 f.write(f"{key}: {value}\n")
             return f.name
     
-    def _parse_output(self, stdout: bytes, stderr: bytes, returncode: int, output_file: str) -> Dict[str, Any]:
+    def _parse_output(self, stdout: bytes, stderr: bytes, returncode: int, output_dir: str) -> Dict[str, Any]:
         """解析SQLMap输出"""
         stdout_str = stdout.decode('utf-8', errors='ignore')
         stderr_str = stderr.decode('utf-8', errors='ignore')
@@ -173,35 +171,13 @@ class SQLMapWrapper:
             "summary": {}
         }
         
-        # 尝试从JSON输出文件读取结果
-        json_file = Path(output_file).parent / "output.json"
-        if json_file.exists():
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    json_data = json.load(f)
-                    result["json_output"] = json_data
-                    
-                    # 提取漏洞信息
-                    if "data" in json_data:
-                        for entry in json_data["data"]:
-                            if "value" in entry and "type" in entry["value"]:
-                                vuln = {
-                                    "type": entry["value"]["type"],
-                                    "parameter": entry.get("parameter", ""),
-                                    "payload": entry.get("payload", ""),
-                                    "title": entry.get("title", "")
-                                }
-                                result["vulnerabilities"].append(vuln)
-            except Exception as e:
-                self.logger.warning(f"解析JSON输出失败: {e}")
-        
         # 从stdout提取信息
         self._extract_from_stdout(stdout_str, result)
         
         # 生成摘要
         result["summary"] = {
             "vulnerability_count": len(result["vulnerabilities"]),
-            "vulnerability_types": list(set(v["type"] for v in result["vulnerabilities"])),
+            "vulnerability_types": list(set(v.get("type", "") for v in result["vulnerabilities"])),
             "success": result["success"]
         }
         
