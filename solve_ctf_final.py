@@ -396,11 +396,19 @@ class CTFSolver:
         """生成解题报告"""
         self.logger.info("生成解题报告...")
         
+        # 确保end_time存在
+        if "end_time" not in results:
+            results["end_time"] = datetime.now().isoformat()
+        
         # 计算耗时
-        if results["start_time"] and results["end_time"]:
-            start = datetime.fromisoformat(results["start_time"])
-            end = datetime.fromisoformat(results["end_time"])
-            results["duration"] = str(end - start)
+        if results.get("start_time") and results.get("end_time"):
+            try:
+                start = datetime.fromisoformat(results["start_time"])
+                end = datetime.fromisoformat(results["end_time"])
+                results["duration"] = str(end - start)
+            except (ValueError, KeyError) as e:
+                self.logger.warning(f"无法计算耗时: {e}")
+                results["duration"] = "未知"
         
         # 创建报告目录
         reports_dir = Path("reports")
@@ -412,10 +420,13 @@ class CTFSolver:
         report_file = reports_dir / f"ctf_solve_{target_safe}_{timestamp}.json"
         
         # 保存JSON报告
-        with open(report_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        
-        self.logger.info(f"报告已保存: {report_file}")
+        try:
+            with open(report_file, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, ensure_ascii=False)
+            self.logger.info(f"报告已保存: {report_file}")
+        except Exception as e:
+            self.logger.error(f"保存报告失败: {e}")
+            return None
         
         # 打印摘要
         self._print_summary(results)
