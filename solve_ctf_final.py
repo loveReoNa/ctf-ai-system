@@ -103,74 +103,79 @@ class CTFSolver:
             results["vulnerabilities"] = scan_result.get("vulnerabilities", [])
             
             if not scan_result.get("vulnerabilities"):
-                print("❌ 未发现SQL注入漏洞")
-                return results
+                print("❌ SQLMap未发现SQL注入漏洞，继续尝试手动payload...")
+            else:
+                print(f"✅ 发现 {len(scan_result['vulnerabilities'])} 个漏洞")
+                results["phases_completed"].append("vulnerability_detection")
             
-            print(f"✅ 发现 {len(scan_result['vulnerabilities'])} 个漏洞")
-            results["phases_completed"].append("vulnerability_detection")
-            
-            # 阶段2: 自动利用
-            print("\n⚡ 阶段2: 自动利用漏洞...")
-            exploit_result = await self.sqlmap_wrapper.auto_exploit(
-                target_url,
-                level=2,  # 降低level，加快利用速度
-                risk=2,   # 降低risk，减少危险操作
-                threads=5  # 减少线程数
-            )
-            
-            step2 = {
-                "step": "auto_exploitation",
-                "result": exploit_result
-            }
-            
-            results["detailed_steps"].append(step2)
-            
-            if exploit_result.get("success"):
-                results["phases_completed"].append("exploitation")
+            # 阶段2: 自动利用（仅在发现漏洞时执行）
+            if scan_result.get("vulnerabilities"):
+                print("\n⚡ 阶段2: 自动利用漏洞...")
+                exploit_result = await self.sqlmap_wrapper.auto_exploit(
+                    target_url,
+                    level=2,  # 降低level，加快利用速度
+                    risk=2,   # 降低risk，减少危险操作
+                    threads=5  # 减少线程数
+                )
                 
-                # 检查是否找到flag
-                if exploit_result.get("flag"):
-                    flag = exploit_result["flag"]
-                    print(f"\n🎉🎉🎉 找到Flag: {flag} 🎉🎉🎉")
-                    results["flags_found"].append(flag)
-                    results["success"] = True
-                else:
-                    # 检查数据中是否包含flag
-                    print("🔍 检查数据中是否包含flag...")
-                    for table_key, table_data in exploit_result.get("data", {}).items():
-                        for record in table_data:
-                            for key, value in record.items():
-                                if isinstance(value, str):
-                                    import re
-                                    flag_patterns = [
-                                        r'flag\{[^}]+\}',
-                                        r'FLAG\{[^}]+\}',
-                                        r'ctf\{[^}]+\}',
-                                        r'CTF\{[^}]+\}',
-                                        r'[A-Za-z0-9]{32}',
-                                        r'[A-Za-z0-9]{64}',
-                                    ]
-                                    for pattern in flag_patterns:
-                                        match = re.search(pattern, value)
-                                        if match:
-                                            flag = match.group()
-                                            print(f"\n🎉🎉🎉 在数据中找到Flag: {flag} 🎉🎉🎉")
-                                            results["flags_found"].append(flag)
-                                            results["success"] = True
+                step2 = {
+                    "step": "auto_exploitation",
+                    "result": exploit_result
+                }
+                
+                results["detailed_steps"].append(step2)
+                
+                if exploit_result.get("success"):
+                    results["phases_completed"].append("exploitation")
+                    
+                    # 检查是否找到flag
+                    if exploit_result.get("flag"):
+                        flag = exploit_result["flag"]
+                        print(f"\n🎉🎉🎉 找到Flag: {flag} 🎉🎉🎉")
+                        results["flags_found"].append(flag)
+                        results["success"] = True
+                    else:
+                        # 检查数据中是否包含flag
+                        print("🔍 检查数据中是否包含flag...")
+                        for table_key, table_data in exploit_result.get("data", {}).items():
+                            for record in table_data:
+                                for key, value in record.items():
+                                    if isinstance(value, str):
+                                        import re
+                                        flag_patterns = [
+                                            r'flag\{[^}]+\}',
+                                            r'FLAG\{[^}]+\}',
+                                            r'ctf\{[^}]+\}',
+                                            r'CTF\{[^}]+\}',
+                                            r'[A-Za-z0-9]{32}',
+                                            r'[A-Za-z0-9]{64}',
+                                        ]
+                                        for pattern in flag_patterns:
+                                            match = re.search(pattern, value)
+                                            if match:
+                                                flag = match.group()
+                                                print(f"\n🎉🎉🎉 在数据中找到Flag: {flag} 🎉🎉🎉")
+                                                results["flags_found"].append(flag)
+                                                results["success"] = True
+                                                break
+                                            
+                                            if results["success"]:
+                                                break
+                                        
+                                        if results["success"]:
                                             break
-                                    
-                                    if results["success"]:
-                                        break
+                                
+                                if results["success"]:
+                                    break
                             
                             if results["success"]:
                                 break
                         
-                        if results["success"]:
-                            break
-                    
-                    if not results["success"] and exploit_result.get("data"):
-                        print("✅ 成功获取数据但未找到明确flag格式")
-                        results["success"] = True  # 部分成功
+                        if not results["success"] and exploit_result.get("data"):
+                            print("✅ 成功获取数据但未找到明确flag格式")
+                            results["success"] = True  # 部分成功
+            else:
+                print("\n⏭️  跳过阶段2（未发现漏洞）")
             
             # 阶段3: 手动尝试常见payload
             if not results["success"]:
