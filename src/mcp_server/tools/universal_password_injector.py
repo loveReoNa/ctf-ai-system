@@ -29,6 +29,8 @@ class UniversalPasswordInjector:
     def __init__(self):
         self.logger = None
         self.session = None
+        self.baseline_response = None  # 基准响应（使用无效凭证）
+        self.baseline_text = None
     
     def set_logger(self, logger):
         """设置日志器"""
@@ -44,6 +46,28 @@ class UniversalPasswordInjector:
         if self.session:
             await self.session.close()
             self.session = None
+    
+    async def get_baseline_response(self, target_url: str, method: str = "GET") -> str:
+        """获取基准响应（使用无效凭证）"""
+        if self.baseline_text is not None:
+            return self.baseline_text
+        
+        try:
+            # 使用明显无效的凭证
+            params = {"username": "invalid_user_12345", "password": "invalid_pass_12345"}
+            
+            if method.upper() == "GET":
+                async with self.session.get(target_url, params=params, timeout=10) as response:
+                    self.baseline_text = await response.text()
+            else:  # POST
+                async with self.session.post(target_url, data=params, timeout=10) as response:
+                    self.baseline_text = await response.text()
+            
+            return self.baseline_text
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"获取基准响应失败: {e}")
+            return ""
     
     def get_standard_payloads(self) -> List[Dict[str, str]]:
         """获取标准万能密码payload"""
@@ -148,11 +172,12 @@ class UniversalPasswordInjector:
         
         return None
     
-    def detect_success_indicators(self, text: str) -> List[str]:
+    def detect_success_indicators(self, text: str, baseline_text: str = None) -> List[str]:
         """检测成功登录的指示器"""
         text_lower = text.lower()
         indicators = []
         
+        # 传统成功关键词
         success_keywords = [
             "登录成功", "登录成功", "success", "welcome", "dashboard", 
             "admin", "logout", "退出", "logged in", "welcome back",
@@ -162,6 +187,39 @@ class UniversalPasswordInjector:
         for keyword in success_keywords:
             if keyword.lower() in text_lower:
                 indicators.append(keyword)
+        
+        # 如果提供了基准响应，检查错误消息是否消失
+        if baseline_text:
+            # 常见错误消息
+            error_patterns = [
+                r"wrong.*username.*password",
+                r"invalid.*credentials",
+                r"login.*failed",
+                r"incorrect.*password",
+                r"authentication.*failed",
+                r"no.*wrong",
+                r"错误.*用户名.*密码",
+                r"登录.*失败",
+            ]
+            
+            # 检查基准响应中是否有错误消息
+            baseline_has_error = False
+            for pattern in error_patterns:
+                if re.search(pattern, baseline_text, re.IGNORECASE):
+                    baseline_has_error = True
+                    break
+            
+            # 检查当前响应中是否没有错误消息
+            if baseline_has_error:
+                current_has_error = False
+                for pattern in error_patterns:
+                    if re.search(pattern, text, re.IGNORECASE):
+                        current_has_error = True
+                        break
+                
+                # 如果基准有错误但当前没有错误，可能表示成功
+                if not current_has_error:
+                    indicators.append("error_message_disappeared")
         
         return indicators
     
@@ -182,6 +240,42 @@ class UniversalPasswordInjector:
         
         return indicators
     
+    def analyze_response_difference(self, response_text: str, baseline_text: str) -> Dict[str, Any]:
+        """分析响应与基准的差异"""
+        analysis = {
+            "length_difference": len(response_text) - len(baseline_text),
+            "content_different": response_text != baseline_text,
+            "error_message_changed": False,
+            "success_indicators_found": [],
+            "likely_success": False
+        }
+        
+        # 检查错误消息变化
+        error_keywords = ["wrong", "invalid", "failed", "incorrect", "error", "no"]
+        baseline_has_error = any(keyword in baseline_text.lower() for keyword in error_keywords)
+        response_has_error = any(keyword in response_text.lower() for keyword in error_keywords)
+        
+        if baseline_has_error and not response_has_error:
+            analysis["error_message_changed"] = True
+            analysis["likely_success"] = True
+            analysis["success_indicators_found"].append("error_message_disappeared")
+        
+        # 检查响应长度显著变化（超过10%）
+        if len(baseline_text) > 0:
+            length_ratio = len(response_text) / len(baseline_text)
+            if abs(length_ratio - 1.0) > 0.1:  # 变化超过10%
+                analysis["success_indicators_found"].append(f"length_change_{length_ratio:.2f}")
+                analysis["likely_success"] = True
+        
+        # 检查特定关键词出现
+        success_keywords = ["welcome", "success", "dashboard", "admin", "logout"]
+        for keyword in success_keywords:
+            if keyword in response_text.lower() and keyword not in baseline_text.lower():
+                analysis["success_indicators_found"].append(f"new_keyword_{keyword}")
+                analysis["likely_success"] = True
+        
+        return analysis
+    
     async def test_payload(self, target_url: str, payload: Dict[str, str], 
                           method: str = "GET") -> Dict[str, Any]:
         """测试单个payload"""
@@ -190,6 +284,9 @@ class UniversalPasswordInjector:
                 "username": payload["username"],
                 "password": payload["password"]
             }
+            
+            # 获取基准响应
+            baseline_text = await self.get_baseline_response(target_url, method)
             
             if method.upper() == "GET":
                 async with self.session.get(target_url, params=params, timeout=10) as response:
@@ -202,19 +299,29 @@ class UniversalPasswordInjector:
             
             # 分析响应
             flag = self.detect_flag(response_text)
-            success_indicators = self.detect_success_indicators(response_text)
+            success_indicators = self.detect_success_indicators(response_text, baseline_text)
             error_indicators = self.detect_error_indicators(response_text)
+            difference_analysis = self.analyze_response_difference(response_text, baseline_text)
+            
+            # 判断是否成功
+            is_success = (
+                flag is not None or 
+                len(success_indicators) > 0 or 
+                difference_analysis["likely_success"]
+            )
             
             result = {
                 "payload": payload,
                 "method": method,
                 "status_code": status_code,
                 "response_length": len(response_text),
+                "baseline_length": len(baseline_text),
                 "flag_found": flag is not None,
                 "flag": flag,
                 "success_indicators": success_indicators,
                 "error_indicators": error_indicators,
-                "success": flag is not None or len(success_indicators) > 0
+                "difference_analysis": difference_analysis,
+                "success": is_success
             }
             
             return result
