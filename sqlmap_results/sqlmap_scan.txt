@@ -1,0 +1,8 @@
+命令: sqlmap -u "http://20bfb079-5070-4c15-9a3e-f82f9c100afd.node5.buuoj.cn:81/check.php?username=test&password=test" --batch --level=2 --risk=2
+返回码: 1
+标准输出:
+
+标准错误:
+'sqlmap' 不是内部或外部命令，也不是可运行的程序
+或批处理文件。
+
