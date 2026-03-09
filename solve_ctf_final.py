@@ -77,17 +77,17 @@ class CTFSolver:
                 self.logger.info(f"使用请求文件: {request_file}")
                 scan_result = await self.sqlmap_wrapper.scan_with_request_file(
                     request_file,
-                    level=5,
-                    risk=3,
-                    threads=10
+                    level=2,  # 降低level，加快扫描速度
+                    risk=2,   # 降低risk，减少危险操作
+                    threads=5  # 减少线程数
                 )
             else:
                 self.logger.info(f"直接扫描URL: {target_url}")
                 scan_result = await self.sqlmap_wrapper.scan(
                     target_url,
-                    level=5,
-                    risk=3,
-                    threads=10
+                    level=2,  # 降低level，加快扫描速度
+                    risk=2,   # 降低risk，减少危险操作
+                    threads=5  # 减少线程数
                 )
             
             step1 = {
@@ -113,9 +113,9 @@ class CTFSolver:
             print("\n⚡ 阶段2: 自动利用漏洞...")
             exploit_result = await self.sqlmap_wrapper.auto_exploit(
                 target_url,
-                level=5,
-                risk=3,
-                threads=10
+                level=2,  # 降低level，加快利用速度
+                risk=2,   # 降低risk，减少危险操作
+                threads=5  # 减少线程数
             )
             
             step2 = {
