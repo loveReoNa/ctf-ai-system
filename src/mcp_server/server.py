@@ -18,6 +18,10 @@ from src.utils.logger import logger, LoggerMixin
 from src.utils.config_manager import config
 from src.utils.tool_parser import tool_parser_factory
 from src.mcp_server.tools.sqlmap_wrapper import sqlmap_wrapper
+from src.mcp_server.tools.universal_password_injector import (
+    universal_password_injection_tool,
+    UniversalPasswordInjector
+)
 
 
 def get_tool_path(tool_name: str) -> str:
@@ -739,6 +743,109 @@ class NmapTool(CTFMCPTool):
             }
 
 
+class UniversalPasswordInjectionTool(CTFMCPTool):
+    """万能密码注入工具"""
+    
+    def __init__(self):
+        super().__init__(
+            name="universal_password_injection",
+            description="使用万能密码payload测试SQL注入漏洞"
+        )
+    
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "target_url": {
+                    "type": "string",
+                    "description": "目标URL"
+                },
+                "payload_type": {
+                    "type": "string",
+                    "description": "payload类型 (all, standard, login_form)",
+                    "default": "all",
+                    "enum": ["all", "standard", "login_form"]
+                },
+                "method": {
+                    "type": "string",
+                    "description": "请求方法 (both, GET, POST)",
+                    "default": "both",
+                    "enum": ["both", "GET", "POST"]
+                },
+                "username_field": {
+                    "type": "string",
+                    "description": "用户名字段名",
+                    "default": "username"
+                },
+                "password_field": {
+                    "type": "string",
+                    "description": "密码字段名",
+                    "default": "password"
+                }
+            },
+            "required": ["target_url"]
+        }
+    
+    async def execute(self, **kwargs) -> Dict[str, Any]:
+        """执行万能密码注入测试"""
+        try:
+            target_url = kwargs.get("target_url")
+            payload_type = kwargs.get("payload_type", "all")
+            method = kwargs.get("method", "both")
+            username_field = kwargs.get("username_field", "username")
+            password_field = kwargs.get("password_field", "password")
+            
+            self.logger.info(f"开始万能密码注入测试: {target_url}")
+            
+            # 根据参数选择方法
+            if method == "both":
+                methods = ["GET", "POST"]
+            else:
+                methods = [method]
+            
+            # 创建注入器实例
+            injector = UniversalPasswordInjector()
+            injector.set_logger(self.logger)
+            
+            # 执行测试
+            if payload_type == "login_form":
+                # 专门测试登录表单
+                result = await injector.brute_force_login_form(
+                    target_url, username_field, password_field
+                )
+            else:
+                # 通用测试
+                result = await universal_password_injection_tool(
+                    target_url, payload_type, method
+                )
+            
+            # 确保结果包含必要的字段
+            if "success" not in result:
+                result["success"] = result.get("flag_found", False) or len(result.get("successful_payloads", [])) > 0
+            
+            if "command" not in result:
+                result["command"] = f"universal_password_injector --target {target_url} --payload-type {payload_type} --method {method}"
+            
+            self.logger.info(f"万能密码注入测试完成: {target_url}, 成功: {result.get('success', False)}")
+            
+            # 清理
+            await injector.close()
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"万能密码注入测试错误: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "target_url": kwargs.get("target_url", ""),
+                "payloads_tested": 0,
+                "successful_payloads": [],
+                "flag_found": False,
+                "flag": None
+            }
+
+
 class CTFMCPToolManager(LoggerMixin):
     """MCP工具管理器"""
     
@@ -811,6 +918,14 @@ class CTFMCPToolManager(LoggerMixin):
             self.log_info(f"工具注册成功: {nmap_tool.name}")
         except Exception as e:
             self.log_error(f"Nmap工具注册失败: {e}")
+        
+        # 注册万能密码注入工具
+        try:
+            universal_password_tool = UniversalPasswordInjectionTool()
+            self.tools[universal_password_tool.name] = universal_password_tool
+            self.log_info(f"工具注册成功: {universal_password_tool.name}")
+        except Exception as e:
+            self.log_error(f"万能密码注入工具注册失败: {e}")
     
     def get_tool(self, name: str) -> Optional[CTFMCPTool]:
         """获取工具实例"""
