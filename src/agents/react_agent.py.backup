@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-ReAct AI代理实现 - 优化版本
+ReAct AI代理实现
 基于Reasoning + Acting框架的智能攻击代理
-借鉴CAI项目设计模式进行优化
 """
 
 import asyncio
 import json
 import re
-import os
-import hashlib
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 
 from src.utils.logger import logger
 from src.utils.deepseek_client import DeepSeekClient
@@ -21,18 +17,14 @@ from src.mcp_server.server import CTFMCPServer
 
 
 class AgentState(Enum):
-    """代理状态枚举 - 扩展版本"""
-    IDLE = "idle"                   # 空闲状态
-    INITIALIZING = "initializing"   # 初始化
-    ANALYZING = "analyzing"         # 分析挑战
-    PLANNING = "planning"           # 规划攻击
-    VALIDATING = "validating"       # 验证计划
-    EXECUTING = "executing"         # 执行攻击
-    OBSERVING = "observing"         # 观察结果
-    ADAPTING = "adapting"           # 自适应调整
-    COMPLETED = "completed"         # 完成
-    FAILED = "failed"               # 失败
-    SUSPENDED = "suspended"         # 暂停
+    """代理状态枚举"""
+    IDLE = "idle"           # 空闲状态
+    ANALYZING = "analyzing" # 分析挑战
+    PLANNING = "planning"   # 规划攻击
+    EXECUTING = "executing" # 执行攻击
+    OBSERVING = "observing" # 观察结果
+    COMPLETED = "completed" # 完成
+    FAILED = "failed"       # 失败
 
 
 class ToolType(Enum):
@@ -70,70 +62,6 @@ class AttackStep:
     timestamp: str = ""
 
 
-class SecurityModule:
-    """安全防护模块"""
-    
-    def __init__(self):
-        self.logger = logger.getChild("security")
-        
-        # 危险操作黑名单
-        self.dangerous_operations = [
-            "rm -rf /",
-            "format c:",
-            "del /f /s /q",
-            "shutdown",
-            "halt",
-            "reboot",
-            "init 0",
-            "dd if=/dev/zero",
-            "mkfs",
-            "chmod 777 /",
-            "echo 1 > /proc/sys/kernel/sysrq"
-        ]
-        
-        # 敏感数据模式
-        self.sensitive_patterns = [
-            r'password\s*[:=]\s*\S+',
-            r'api[_-]?key\s*[:=]\s*\S+',
-            r'token\s*[:=]\s*\S+',
-            r'secret\s*[:=]\s*\S+',
-            r'private[_-]?key\s*[:=]\s*\S+',
-            r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',  # 电话号码
-            r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'  # 邮箱
-        ]
-    
-    def validate_tool_parameters(self, tool_name: str, parameters: Dict[str, Any]) -> Tuple[bool, str]:
-        """验证工具参数安全性"""
-        # 检查危险操作
-        param_str = json.dumps(parameters).lower()
-        for dangerous_op in self.dangerous_operations:
-            if dangerous_op in param_str:
-                return False, f"检测到危险操作: {dangerous_op}"
-        
-        # 检查敏感数据泄露
-        for pattern in self.sensitive_patterns:
-            if re.search(pattern, param_str, re.IGNORECASE):
-                self.logger.warning(f"检测到敏感数据模式: {pattern}")
-                # 不阻止，但记录警告
-        
-        return True, "参数验证通过"
-    
-    def sanitize_output(self, output: str) -> str:
-        """清理输出中的敏感信息"""
-        sanitized = output
-        
-        # 替换敏感数据
-        for pattern in self.sensitive_patterns:
-            sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
-        
-        return sanitized
-    
-    def check_rate_limit(self, tool_name: str) -> bool:
-        """检查速率限制"""
-        # 简单实现，实际中应该使用更复杂的速率限制
-        return True
-
-
 @dataclass
 class AttackPlan:
     """攻击计划"""
@@ -142,11 +70,10 @@ class AttackPlan:
     current_step: int = 0
     vulnerabilities: List[str] = field(default_factory=list)
     confidence: float = 0.0  # 0-1之间的置信度
-    metadata: Dict[str, Any] = field(default_factory=dict)  # 新增元数据字段
 
 
 class ReActAgent:
-    """ReAct AI代理主类 - 优化版本"""
+    """ReAct AI代理主类"""
     
     def __init__(self, config: Dict[str, Any]):
         """
@@ -156,7 +83,7 @@ class ReActAgent:
             config: 代理配置
         """
         self.config = config
-        self.state = AgentState.INITIALIZING
+        self.state = AgentState.IDLE
         self.logger = logger.getChild("react_agent")
         
         # 初始化AI客户端（DeepSeekClient从配置管理器读取配置）
@@ -171,87 +98,23 @@ class ReActAgent:
         # 执行历史
         self.execution_history: List[Dict[str, Any]] = []
         
-        # 会话管理
-        self.session_id = hashlib.md5(str(os.urandom(16)).encode()).hexdigest()[:8]
-        self.session_start_time = asyncio.get_event_loop().time()
+        # 工具映射
+        self.tool_mapping = {
+            "sqlmap_scan": ToolType.EXPLOITATION,
+            "nmap_scan": ToolType.SCANNING,
+        }
         
-        # 动态工具缓存
-        self.available_tools_cache: List[Dict[str, Any]] = []
-        self.tool_mapping: Dict[str, Any] = {}
-        self.tool_last_updated = 0
-        
-        # 安全防护模块
-        self.security_module = SecurityModule()
-        
-        # 提示模板路径
-        self.prompt_templates_path = Path(__file__).parent / "prompts"
-        
-        # 自适应学习
-        self.learning_cache: Dict[str, Any] = {}
-        
-        self.logger.info(f"ReAct代理初始化完成 (会话ID: {self.session_id})")
+        self.logger.info("ReAct代理初始化完成")
     
     async def initialize(self):
         """初始化代理"""
         try:
-            self.state = AgentState.INITIALIZING
-            self.logger.info("开始初始化代理...")
-            
-            # 初始化MCP服务器
             await self.mcp_server.initialize()
             self.logger.info("MCP服务器初始化完成")
-            
-            # 动态发现可用工具
-            await self.refresh_available_tools()
-            
-            # 加载提示模板
-            self._load_prompt_templates()
-            
-            self.state = AgentState.IDLE
-            self.logger.info(f"代理初始化完成，发现 {len(self.available_tools_cache)} 个工具")
             return True
-            
         except Exception as e:
-            self.logger.error(f"代理初始化失败: {e}")
-            self.state = AgentState.FAILED
+            self.logger.error(f"MCP服务器初始化失败: {e}")
             return False
-    
-    async def refresh_available_tools(self):
-        """刷新可用工具列表"""
-        try:
-            # 从MCP服务器获取工具列表
-            tools = await self.mcp_server.handle_list_tools()
-            self.available_tools_cache = tools
-            # 构建工具名称到工具定义的映射
-            self.tool_mapping = {tool["name"]: tool for tool in tools}
-            self.tool_last_updated = asyncio.get_event_loop().time()
-            self.logger.info(f"刷新工具列表，共 {len(tools)} 个工具")
-        except Exception as e:
-            self.logger.warning(f"刷新工具列表失败: {e}")
-            # 使用默认工具映射
-            self.available_tools_cache = [
-                {"name": "sqlmap_scan", "description": "SQL注入扫描工具"},
-                {"name": "nmap_scan", "description": "端口扫描工具"}
-            ]
-            self.tool_mapping = {tool["name"]: tool for tool in self.available_tools_cache}
-    
-    def _load_prompt_templates(self):
-        """加载提示模板"""
-        self.prompt_templates = {}
-        
-        if not self.prompt_templates_path.exists():
-            self.logger.warning(f"提示模板目录不存在: {self.prompt_templates_path}")
-            return
-        
-        for template_file in self.prompt_templates_path.glob("*.txt"):
-            try:
-                with open(template_file, 'r', encoding='utf-8') as f:
-                    self.prompt_templates[template_file.stem] = f.read()
-                self.logger.debug(f"加载提示模板: {template_file.stem}")
-            except Exception as e:
-                self.logger.warning(f"加载提示模板失败 {template_file}: {e}")
-        
-        self.logger.info(f"加载了 {len(self.prompt_templates)} 个提示模板")
     
     def set_challenge(self, challenge: CTFChallenge):
         """设置当前挑战"""
@@ -274,44 +137,32 @@ class ReActAgent:
         
         challenge = self.current_plan.challenge
         
-        # 使用模板构建分析提示
-        template = self.prompt_templates.get("analysis_prompt")
-        if template:
-            prompt = template.format(
-                title=challenge.title,
-                category=challenge.category,
-                difficulty=challenge.difficulty,
-                target_url=challenge.target_url,
-                description=challenge.description,
-                hints="\n".join(f"- {hint}" for hint in challenge.hints)
-            )
-        else:
-            # 回退到硬编码提示
-            prompt = f"""
-            请分析以下CTF挑战：
-            
-            标题: {challenge.title}
-            类别: {challenge.category}
-            难度: {challenge.difficulty}
-            目标URL: {challenge.target_url}
-            描述: {challenge.description}
-            
-            提示:
-            {chr(10).join(f'- {hint}' for hint in challenge.hints)}
-            
-            请分析：
-            1. 可能的漏洞类型
-            2. 攻击入口点
-            3. 需要收集的信息
-            4. 建议的攻击策略
-            
-            请以JSON格式回复，包含以下字段：
-            - vulnerabilities: 可能的漏洞列表
-            - entry_points: 攻击入口点
-            - information_needed: 需要收集的信息
-            - strategy: 攻击策略描述
-            - confidence: 分析置信度 (0-1)
-            """
+        # 构建分析提示
+        prompt = f"""
+        请分析以下CTF挑战：
+        
+        标题: {challenge.title}
+        类别: {challenge.category}
+        难度: {challenge.difficulty}
+        目标URL: {challenge.target_url}
+        描述: {challenge.description}
+        
+        提示:
+        {chr(10).join(f'- {hint}' for hint in challenge.hints)}
+        
+        请分析：
+        1. 可能的漏洞类型
+        2. 攻击入口点
+        3. 需要收集的信息
+        4. 建议的攻击策略
+        
+        请以JSON格式回复，包含以下字段：
+        - vulnerabilities: 可能的漏洞列表
+        - entry_points: 攻击入口点
+        - information_needed: 需要收集的信息
+        - strategy: 攻击策略描述
+        - confidence: 分析置信度 (0-1)
+        """
         
         try:
             # 调用AI进行分析
@@ -329,13 +180,6 @@ class ReActAgent:
             
             if "confidence" in analysis_result:
                 self.current_plan.confidence = analysis_result["confidence"]
-            
-            # 记录到学习缓存
-            self.learning_cache[f"analysis_{challenge.id}"] = {
-                "challenge": challenge.title,
-                "result": analysis_result,
-                "timestamp": asyncio.get_event_loop().time()
-            }
             
             self.logger.info(f"挑战分析完成，置信度: {self.current_plan.confidence:.2f}")
             self.logger.info(f"识别到漏洞: {self.current_plan.vulnerabilities}")
@@ -943,7 +787,7 @@ class ReActAgent:
     
     async def run_full_attack(self, challenge: CTFChallenge) -> Dict[str, Any]:
         """
-        运行完整的攻击流程 - 优化版本，包含自适应学习
+        运行完整的攻击流程
         
         Args:
             challenge: CTF挑战
@@ -968,14 +812,8 @@ class ReActAgent:
             # 4. 执行攻击
             execution_result = await self.execute_plan()
             
-            # 5. 自适应学习
-            await self.adaptive_learning(challenge, execution_result)
-            
-            # 6. 生成报告
+            # 5. 生成报告
             report = self.generate_report(analysis_result, attack_plan, execution_result)
-            
-            # 7. 添加学习洞察
-            report["learning_insights"] = self.get_learning_insights()
             
             self.logger.info("完整攻击流程完成")
             return report
@@ -1018,92 +856,8 @@ class ReActAgent:
             "state": self.state.value,
             "current_plan": self.current_plan.challenge.title if self.current_plan else None,
             "execution_history_count": len(self.execution_history),
-            "tools_available": list(self.tool_mapping.keys()),
-            "session_id": self.session_id,
-            "learning_cache_size": len(self.learning_cache),
-            "available_tools_count": len(self.available_tools_cache)
+            "tools_available": list(self.tool_mapping.keys())
         }
-    
-    async def adaptive_learning(self, challenge: CTFChallenge, result: Dict[str, Any]):
-        """自适应学习 - 根据执行结果调整策略"""
-        try:
-            self.state = AgentState.ADAPTING
-            self.logger.info("开始自适应学习...")
-            
-            # 记录学习数据
-            learning_key = f"learning_{challenge.id}_{int(asyncio.get_event_loop().time())}"
-            self.learning_cache[learning_key] = {
-                "challenge": challenge.title,
-                "category": challenge.category,
-                "difficulty": challenge.difficulty,
-                "result": result,
-                "timestamp": asyncio.get_event_loop().time()
-            }
-            
-            # 分析成功模式
-            if result.get("success") or result.get("flag_found"):
-                # 记录成功策略
-                success_pattern = {
-                    "challenge_type": challenge.category,
-                    "effective_steps": result.get("successful_steps", 0),
-                    "tools_used": [step.get("tool") for step in result.get("steps_details", []) if step.get("tool")],
-                    "timestamp": asyncio.get_event_loop().time()
-                }
-                self.learning_cache[f"success_pattern_{challenge.category}"] = success_pattern
-                self.logger.info(f"记录成功模式: {challenge.category}")
-            
-            # 清理旧的学习缓存（保留最近100条）
-            if len(self.learning_cache) > 100:
-                # 按时间戳排序并删除最旧的
-                sorted_keys = sorted(self.learning_cache.keys(),
-                                   key=lambda k: self.learning_cache[k].get("timestamp", 0))
-                for key in sorted_keys[:-100]:
-                    del self.learning_cache[key]
-            
-            self.state = AgentState.IDLE
-            self.logger.info("自适应学习完成")
-            
-        except Exception as e:
-            self.logger.error(f"自适应学习失败: {e}")
-            self.state = AgentState.IDLE
-    
-    def get_learning_insights(self) -> Dict[str, Any]:
-        """获取学习洞察"""
-        insights = {
-            "total_learning_entries": len(self.learning_cache),
-            "challenge_categories": {},
-            "success_rate": 0,
-            "common_tools": {}
-        }
-        
-        # 分析学习缓存
-        success_count = 0
-        total_challenges = 0
-        
-        for key, entry in self.learning_cache.items():
-            if key.startswith("analysis_"):
-                category = entry.get("challenge", "").split()[-1] if "challenge" in entry else "unknown"
-                insights["challenge_categories"][category] = insights["challenge_categories"].get(category, 0) + 1
-                total_challenges += 1
-            
-            if key.startswith("success_pattern_"):
-                success_count += 1
-        
-        # 计算成功率
-        if total_challenges > 0:
-            insights["success_rate"] = success_count / total_challenges
-        
-        # 分析常用工具
-        tool_usage = {}
-        for key, entry in self.learning_cache.items():
-            if "tools_used" in entry:
-                for tool in entry["tools_used"]:
-                    if tool:
-                        tool_usage[tool] = tool_usage.get(tool, 0) + 1
-        
-        insights["common_tools"] = dict(sorted(tool_usage.items(), key=lambda x: x[1], reverse=True)[:5])
-        
-        return insights
 
 
 # 示例使用

@@ -1,0 +1,23 @@
+请分析以下CTF挑战：
+
+标题: {title}
+类别: {category}
+难度: {difficulty}
+目标URL: {target_url}
+描述: {description}
+
+提示:
+{hints}
+
+请分析：
+1. 可能的漏洞类型
+2. 攻击入口点
+3. 需要收集的信息
+4. 建议的攻击策略
+
+请以JSON格式回复，包含以下字段：
+- vulnerabilities: 可能的漏洞列表
+- entry_points: 攻击入口点
+- information_needed: 需要收集的信息
+- strategy: 攻击策略描述
+- confidence: 分析置信度 (0-1)

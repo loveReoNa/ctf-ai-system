@@ -1,0 +1,25 @@
+基于以下分析结果，规划攻击链：
+
+挑战: {title}
+目标URL: {target_url}
+识别到的漏洞: {vulnerabilities}
+置信度: {confidence}
+
+可用工具:
+{available_tools}
+
+请规划一个多步骤的攻击链，每个步骤应包含：
+1. 步骤编号
+2. 行动描述
+3. 使用的工具（如果有）
+4. 工具参数
+5. 推理过程
+6. 预期结果
+
+请以JSON数组格式回复，每个元素包含：
+- step_id: 步骤编号
+- action: 行动描述
+- tool: 工具名称（可选）
+- parameters: 工具参数（可选）
+- reasoning: 推理过程
+- expected_result: 预期结果
